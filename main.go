@@ -11,7 +11,8 @@ import (
 	//"strings"
 	"os"
 	//"path/filepath"
-	"github.com/bertbaron/dedup/btrfs"
+	"github.com/bertbaron/btrdedup/btrfs"
+	"path/filepath"
 )
 
 func c2s(ca [65]int8) string {
@@ -23,9 +24,29 @@ func c2s(ca [65]int8) string {
 		}
 		s[lens] = uint8(ca[lens])
 	}
-	same_xt_info := btrfs.Btrfs_ioctl_same_extent_info{}
-	log.Printf("Struct: %v", same_xt_info)
 	return string(s[0:lens])
+}
+
+func currentWorkdingDir() string {
+	finfo, err := os.Stat(".")
+	if err != nil {
+		log.Fatal("Error looking up current directory: %v", err)
+	}
+	path, err := filepath.Abs(finfo.Name())
+	if err != nil {
+		log.Fatal("Error looking up absolute path: %v", err)
+	}
+	return path
+}
+
+func printSystemInfo() {
+	buf := unix.Utsname{}
+	if err := unix.Uname(&buf); err != nil {
+		log.Printf("Error: %v", err)
+	} else {
+		log.Printf("Sysname: %v", c2s(buf.Sysname))
+		log.Printf("Release: %v", c2s(buf.Release))
+	}
 }
 
 func dedup(filename1, filename2 string, len int64) {
@@ -40,16 +61,12 @@ func dedup(filename1, filename2 string, len int64) {
 	}
 	defer file1.Close()
 	log.Printf("Files: %v and %v", file1, file2)
+	xtInfo := btrfs.Btrfs_ioctl_same_extent_info{}
+	log.Printf("xtInfo: %v", xtInfo)
 }
 
 func main() {
-	log.Printf("Hello world\n")
-	buf := unix.Utsname{}
-	if err := unix.Uname(&buf); err != nil {
-		log.Printf("Error: %v", err)
-	} else {
-		log.Printf("Sysname: %v", c2s(buf.Sysname))
-		log.Printf("Release: %v", c2s(buf.Release))
-	}
-	dedup("/home/bert/gocode/src/github.com/bertbaron/dedup/local/mnt/dir1/5m.mts", "/home/bert/gocode/src/github.com/bertbaron/dedup/local/mnt/dir2/5m.mts", 4096)
+	log.Printf("Current working directory: %v", currentWorkdingDir())
+	printSystemInfo()
+	dedup("local/mnt/dir1/5m.mts", "local/mnt/dir2/5m.mts", 4096)
 }
