@@ -3,10 +3,8 @@ package btrfs
 import (
 	//"golang.org/x/sys/unix"
 	"os"
+	"github.com/bertbaron/btrdedup/ioctl"
 	"unsafe"
-	"golang.org/x/sys/unix"
-
-	"syscall"
 )
 
 const (
@@ -37,15 +35,19 @@ type btrfs_ioctl_same_args struct {
 	info           *btrfs_ioctl_same_extent_info
 }
 
-func ioctl(fd, op, arg uintptr) error {
-	_, _, ep := unix.Syscall(unix.SYS_IOCTL, fd, op, arg)
-	if ep != 0 {
-		return syscall.Errno(ep)
-	}
-	return nil
-}
-func Btrfs_extent_same(file *os.File, same *btrfs_ioctl_same_args) int {
-	ioctl(file.Fd(), BTRFS_IOC_FILE_EXTENT_SAME, same)
+func Btrfs_extent_same(file *os.File, same btrfs_ioctl_same_args) int {
+	size := unsafe.Sizeof(same)
+	op := ioctl.IOWR(btrfs_ioctl_magic, 54, size)
+	ioctl.IOCTL(file.Fd(), op, same)
 	return 0
 	//return ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, same)
+}
+
+type BtrfsSameExtendInfo struct {
+	file *os.File
+	logicalOffset uint64
+}
+
+func BtrfsExtendSame(file *os.File, logicalOffset, length uint64, destCount uint16, same []BtrfsSameExtendInfo) {
+
 }
