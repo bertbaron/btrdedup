@@ -57,6 +57,7 @@ func IOW(t, nr, size uintptr) uintptr {
 }
 
 func IOWR(t, nr, size uintptr) uintptr {
+	log.Printf("IOWR(%x, %x, %x)", t, nr, size)
 	return IOC(IOC_READ|IOC_WRITE, t, nr, size)
 }
 
@@ -73,6 +74,7 @@ func IOWR_BAD(t, nr, size uintptr) uintptr {
 }
 
 func IOCTL(fd, op, arg uintptr) error {
+	log.Printf("IOCTL(%x, %x, %x)", fd, op, arg)
 	r1, r2, ep := syscall.Syscall(syscall.SYS_IOCTL, fd, op, arg)
 	if ep != 0 {
 		return syscall.Errno(ep)
