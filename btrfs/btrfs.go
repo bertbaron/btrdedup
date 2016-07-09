@@ -1,11 +1,22 @@
 package btrfs
 
+/*
+#include <stdio.h>
+#include <stdlib.h>
+
+void myprint(char* s) {
+    printf("%s\n", s);
+}
+*/
+import "C"
+
 import (
 	//"golang.org/x/sys/unix"
 	"os"
 	//"github.com/bertbaron/btrdedup/ioctl"
-	"unsafe"
+	//"unsafe"
 	"log"
+	"unsafe"
 )
 
 const (
@@ -13,7 +24,7 @@ const (
 	btrfs_same_data_differs = 1
 )
 
-/* For extent-same ioctl */
+// size 32
 type btrfs_ioctl_same_extent_info struct {
 	fd             int64  /* in - destination file */
 	logical_offset uint64 /* in - start of extent in destination */
@@ -27,18 +38,22 @@ type btrfs_ioctl_same_extent_info struct {
 	reserved       uint32
 }
 
+// size 24
 type btrfs_ioctl_same_args struct {
 	logical_offset uint64 /* in - start of extent in source */
 	length         uint64 /* in - length of extent */
 	dest_count     uint16 /* in - total elements in info array */
 	reserved1      uint16
 	reserved2      uint32
-	//info[0]      btrfs_ioctl_same_extent_info
+			      //info      btrfs_ioctl_same_extent_info[]
 }
 
-func messageSize() {
-
+func Example() {
+	cs := C.CString("Hello from stdio\n")
+	C.myprint(cs)
+	C.free(unsafe.Pointer(cs))
 }
+
 //func Btrfs_extent_same(file *os.File, same btrfs_ioctl_same_args) int {
 //	size := unsafe.Sizeof(same)
 //	op := ioctl.IOWR(btrfs_ioctl_magic, 54, size)
@@ -48,14 +63,16 @@ func messageSize() {
 //}
 
 type BtrfsSameExtendInfo struct {
-	File *os.File
+	File          *os.File
 	LogicalOffset uint64
 }
 
 func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
+	var size uintptr = uintptr(24 + 32 * (len(same) - 1))
 	//var l uint = uint(len(same) - 1)
 	log.Printf("Len: %v", len(same))
-	size := uint(unsafe.Sizeof(btrfs_ioctl_same_args{})) // * l
+	//size := uint(unsafe.Sizeof(btrfs_ioctl_same_extent_info{})) // * l
 	//size := unsafe.Sizeof(btrfs_ioctl_same_args{} + (len(same) - 1) * unsafe.Sizeof(btrfs_ioctl_same_extent_info{}))
 	log.Printf("Bericht grootte: %v", size)
+	Example()
 }
