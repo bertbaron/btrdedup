@@ -3,6 +3,7 @@ package ioctl
 
 import (
 	"syscall"
+	"log"
 )
 
 const (
@@ -72,9 +73,10 @@ func IOWR_BAD(t, nr, size uintptr) uintptr {
 }
 
 func IOCTL(fd, op, arg uintptr) error {
-	_, _, ep := syscall.Syscall(syscall.SYS_IOCTL, fd, op, arg)
+	r1, r2, ep := syscall.Syscall(syscall.SYS_IOCTL, fd, op, arg)
 	if ep != 0 {
 		return syscall.Errno(ep)
 	}
+	log.Printf("Syscall result: %v, %v", r1, r2)
 	return nil
 }
