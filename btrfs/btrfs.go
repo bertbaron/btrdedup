@@ -3,8 +3,9 @@ package btrfs
 import (
 	//"golang.org/x/sys/unix"
 	"os"
-	"github.com/bertbaron/btrdedup/ioctl"
+	//"github.com/bertbaron/btrdedup/ioctl"
 	"unsafe"
+	"log"
 )
 
 const (
@@ -32,22 +33,29 @@ type btrfs_ioctl_same_args struct {
 	dest_count     uint16 /* in - total elements in info array */
 	reserved1      uint16
 	reserved2      uint32
-	info           *btrfs_ioctl_same_extent_info
+	//info[0]      btrfs_ioctl_same_extent_info
 }
 
-func Btrfs_extent_same(file *os.File, same btrfs_ioctl_same_args) int {
-	size := unsafe.Sizeof(same)
-	op := ioctl.IOWR(btrfs_ioctl_magic, 54, size)
-	ioctl.IOCTL(file.Fd(), op, same)
-	return 0
-	//return ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, same)
+func messageSize() {
+
 }
+//func Btrfs_extent_same(file *os.File, same btrfs_ioctl_same_args) int {
+//	size := unsafe.Sizeof(same)
+//	op := ioctl.IOWR(btrfs_ioctl_magic, 54, size)
+//	ioctl.IOCTL(file.Fd(), op, same)
+//	return 0
+//	//return ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, same)
+//}
 
 type BtrfsSameExtendInfo struct {
-	file *os.File
-	logicalOffset uint64
+	File *os.File
+	LogicalOffset uint64
 }
 
-func BtrfsExtendSame(file *os.File, logicalOffset, length uint64, destCount uint16, same []BtrfsSameExtendInfo) {
-
+func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
+	//var l uint = uint(len(same) - 1)
+	log.Printf("Len: %v", len(same))
+	size := uint(unsafe.Sizeof(btrfs_ioctl_same_args{})) // * l
+	//size := unsafe.Sizeof(btrfs_ioctl_same_args{} + (len(same) - 1) * unsafe.Sizeof(btrfs_ioctl_same_extent_info{}))
+	log.Printf("Bericht grootte: %v", size)
 }

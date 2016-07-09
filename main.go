@@ -61,8 +61,14 @@ func dedup(filename1, filename2 string, len int64) {
 	}
 	defer file1.Close()
 	log.Printf("Files: %v and %v", file1, file2)
-	xtInfo := btrfs.Btrfs_ioctl_same_extent_info{}
-	log.Printf("xtInfo: %v", xtInfo)
+	//xtInfo := btrfs.BtrfsSameExtendInfo{}
+	//xtInfo.File = file2
+	//xtInfo.LogicalOffset = 0
+	same := make([]btrfs.BtrfsSameExtendInfo,0)
+	same = append(same, btrfs.BtrfsSameExtendInfo{File: file1, LogicalOffset: 0})
+	same = append(same, btrfs.BtrfsSameExtendInfo{File: file2, LogicalOffset: 0})
+	btrfs.BtrfsExtendSame(same, 4096)
+	//log.Printf("xtInfo: %v", xtInfo)
 }
 
 func main() {
