@@ -115,14 +115,16 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
 
 	fillArgumentStructure(same, length, args, info)
 
-	log.Printf("args: %v, info: %v", args, info)
+	log.Printf("IN:  args: %v, info: %v", args, info)
 
-	op := ioctl.IOWR(btrfs_ioctl_magic, 54, uintptr(messageSize(len(same))))
+	//op := ioctl.IOWR(btrfs_ioctl_magic, 54, uintptr(messageSize(len(same))))
+	op := ioctl.IOWR(btrfs_ioctl_magic, 54, 24)
 	log.Printf("Operation: %X", op)
 	err := ioctl.IOCTL(same[0].File.Fd(), op, (uintptr)((unsafe.Pointer)(args)))
 	if (err != nil) {
 		log.Fatalf("Error while deduplicating: %v", err)
 	}
+	log.Printf("OUT: args: %v, info: %v", args, info)
 
 	//size := uint(unsafe.Sizeof(btrfs_ioctl_same_extent_info{})) // * l
 	//size := unsafe.Sizeof(btrfs_ioctl_same_args{} + (len(same) - 1) * unsafe.Sizeof(btrfs_ioctl_same_extent_info{}))
