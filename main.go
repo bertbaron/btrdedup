@@ -49,7 +49,7 @@ func printSystemInfo() {
 	}
 }
 
-func dedup(filename1, filename2 string, len int64) {
+func dedup(filename1, filename2 string, len uint64) {
 	file1, err := os.Open(filename1) // For read access.
 	if err != nil {
 		log.Fatal(err)
@@ -67,12 +67,12 @@ func dedup(filename1, filename2 string, len int64) {
 	same := make([]btrfs.BtrfsSameExtendInfo,0)
 	same = append(same, btrfs.BtrfsSameExtendInfo{File: file1, LogicalOffset: 0})
 	same = append(same, btrfs.BtrfsSameExtendInfo{File: file2, LogicalOffset: 0})
-	btrfs.BtrfsExtendSame(same, 4096)
+	btrfs.BtrfsExtendSame(same, len)
 	//log.Printf("xtInfo: %v", xtInfo)
 }
 
 func main() {
 	log.Printf("Current working directory: %v", currentWorkdingDir())
 	printSystemInfo()
-	dedup("local/mnt/dir1/5m.mts", "local/mnt/dir2/5m.mts", 4096)
+	dedup("local/mnt/dir1/5m.mts", "local/mnt/dir2/5m.mts", 4 * 1024)
 }
