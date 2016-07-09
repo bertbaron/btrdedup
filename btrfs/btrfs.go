@@ -2,13 +2,12 @@ package btrfs
 
 /*
 #include <stdio.h>
-#include <stdint.h>
 #include <stdlib.h>
-#include <sys/ioctl.h>
+#include <string.h>
+#include <stdint.h>
+#include <sys/vfs.h>
 
-uint64_t code(size_t size) {
-  return _IOC(IOC_INOUT, 0x94, 54, size);
-}
+#include <errno.h>
 */
 import "C"
 
@@ -125,6 +124,12 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
 		log.Fatalf("Error while deduplicating: %v", err)
 	}
 	log.Printf("OUT: args: %v, info: %v", args, info)
+
+	for _, element := range info {
+		if element.status < 0 {
+			log.Printf("Error: %v", C.GoString(C.strerror(C.int(-element.status))))
+		}
+	}
 
 	//size := uint(unsafe.Sizeof(btrfs_ioctl_same_extent_info{})) // * l
 	//size := unsafe.Sizeof(btrfs_ioctl_same_args{} + (len(same) - 1) * unsafe.Sizeof(btrfs_ioctl_same_extent_info{}))
