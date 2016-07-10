@@ -1,16 +1,9 @@
 package main
 
 import (
-	//	"crypto/md5"
-	//	"flag"
-	//"fmt"
-	//	"io"
-	//	"io/ioutil"
 	"log"
 	"golang.org/x/sys/unix"
-	//"strings"
 	"os"
-	//"path/filepath"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"path/filepath"
 )
