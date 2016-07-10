@@ -59,7 +59,7 @@ func dedup(filename1, filename2 string, len uint64) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer file1.Close()
+	defer file2.Close()
 	log.Printf("Files: %v and %v", file1, file2)
 	//xtInfo := btrfs.BtrfsSameExtendInfo{}
 	//xtInfo.File = file2

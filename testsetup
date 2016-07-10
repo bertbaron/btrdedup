@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# This script creates an image file, formats it with btrfs and mounts it as
+# loopback device.
+set -eu
+
+dir=local
+img="$dir/img"
+mnt="$dir/mnt"
+
+sudo umount "$mnt" || echo "Unable to unmount, image was probably not mounted"
+sudo losetup -d /dev/loop0 || echo "Unable to detach loopback device, it was probably not setup"
+
+mkdir -p "$mnt"
+truncate -s 100m "$img"
+mkfs.btrfs "$img"
+sudo losetup /dev/loop0 "$img"
+sudo mount /dev/loop0 "$mnt"
+sudo chmod 777 "$mnt"
+
+dd if=/dev/urandom of="$dir/a" bs=1M count=2
+
+cp "$dir/a" "$mnt/a1"
+cp "$dir/a" "$mnt/a2"
