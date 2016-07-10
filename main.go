@@ -74,5 +74,5 @@ func dedup(filename1, filename2 string, len uint64) {
 func main() {
 	log.Printf("Current working directory: %v", currentWorkdingDir())
 	printSystemInfo()
-	dedup("local/mnt/dir1/5m.mts", "local/mnt/dir2/5m.mts", 4 * 1024)
+	dedup("local/mnt/a1", "local/mnt/a2", 2097152)
 }

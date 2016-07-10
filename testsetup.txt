@@ -1,4 +1,0 @@
-truncate -s 100m img0
-mkfs.btrfs img0
-sudo losetup /dev/loop0 img0
-sudo mount /dev/loop0 mnt

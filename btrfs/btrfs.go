@@ -8,17 +8,24 @@ package btrfs
 #include <sys/vfs.h>
 
 #include <errno.h>
+
+void print_mem(void const *vp, size_t n)
+{
+    unsigned char const *p = vp;
+    for (size_t i=0; i<n; i++) {
+        printf("%02x", p[i]);
+        if (i % 8 == 3) { printf(" "); }
+        if (i % 8 == 7) { printf("\n"); }
+    }
+    putchar('\n');
+};
 */
 import "C"
 
 import (
-	//"golang.org/x/sys/unix"
 	"os"
-	//"github.com/bertbaron/btrdedup/ioctl"
-	//"unsafe"
 	"log"
 	"unsafe"
-	//"fmt"
 	"github.com/bertbaron/btrdedup/ioctl"
 )
 
@@ -55,12 +62,6 @@ func messageSize(fileCount int) int {
 	return 32 * fileCount - 8
 }
 
-func free(args *sameArgs) {
-	ptr := (unsafe.Pointer)(args)
-	log.Printf("Freeing memory at: %v", ptr)
-	C.free(ptr)
-}
-
 // Allocates memory in C. Note that the C struct contains a dynamic array at the end, which is not possible in go,
 // therefore we return a go slice which is backed by that dynamic array in addition to the pointer to the args struct
 func allocate(fileCount int) (*sameArgs, []sameExtendInfo) {
@@ -75,14 +76,11 @@ func allocate(fileCount int) (*sameArgs, []sameExtendInfo) {
 	return args, extendInfo
 }
 
-
-//func Btrfs_extent_same(file *os.File, same btrfs_ioctl_same_args) int {
-//	size := unsafe.Sizeof(same)
-//	op := ioctl.IOWR(btrfs_ioctl_magic, 54, size)
-//	ioctl.IOCTL(file.Fd(), op, same)
-//	return 0
-//	//return ioctl(fd, BTRFS_IOC_FILE_EXTENT_SAME, same)
-//}
+func free(args *sameArgs) {
+	ptr := (unsafe.Pointer)(args)
+	log.Printf("Freeing memory at: %v", ptr)
+	C.free(ptr)
+}
 
 func fillArgumentStructure(same []BtrfsSameExtendInfo, length uint64, args *sameArgs, info []sameExtendInfo) {
 	args.logical_offset = same[0].LogicalOffset
@@ -115,6 +113,8 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
 	fillArgumentStructure(same, length, args, info)
 
 	log.Printf("IN:  args: %v, info: %v", args, info)
+	log.Printf("MEMORY DUMP:\n")
+	C.print_mem((unsafe.Pointer)(args), 56)
 
 	//op := ioctl.IOWR(btrfs_ioctl_magic, 54, uintptr(messageSize(len(same))))
 	op := ioctl.IOWR(btrfs_ioctl_magic, 54, 24)
@@ -130,8 +130,4 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) {
 			log.Printf("Error: %v", C.GoString(C.strerror(C.int(-element.status))))
 		}
 	}
-
-	//size := uint(unsafe.Sizeof(btrfs_ioctl_same_extent_info{})) // * l
-	//size := unsafe.Sizeof(btrfs_ioctl_same_args{} + (len(same) - 1) * unsafe.Sizeof(btrfs_ioctl_same_extent_info{}))
-	//log.Printf("Bericht grootte: %v", size)
 }
