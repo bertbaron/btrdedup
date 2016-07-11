@@ -66,7 +66,7 @@ func messageSize(fileCount int) int {
 // therefore we return a go slice which is backed by that dynamic array in addition to the pointer to the args struct
 func allocate(fileCount int) (*sameArgs, []sameExtendInfo) {
 	size := C.size_t(messageSize(fileCount))
-	ptr := C.malloc(size) // allocate memory for sameArgs + n-1*sameExtendInfo
+	ptr := C.malloc(size) // allocate memory for sameArgs + (n-1)*sameExtendInfo
 	log.Printf("Allocated memory at: %v", ptr)
 	args := (*sameArgs)(ptr)
 

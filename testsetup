@@ -22,3 +22,5 @@ dd if=/dev/urandom of="$dir/a" bs=1M count=2
 
 cp "$dir/a" "$mnt/a1"
 cp "$dir/a" "$mnt/a2"
+cp "$mnt/a1" "$mnt/a1a"
+cp "$mnt/a2" "$mnt/a2a"
