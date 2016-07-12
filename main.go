@@ -58,7 +58,11 @@ func dedup(filename1, filename2 string, offset, len uint64) {
 	same := make([]btrfs.BtrfsSameExtendInfo, 0)
 	same = append(same, btrfs.BtrfsSameExtendInfo{file1, offset})
 	same = append(same, btrfs.BtrfsSameExtendInfo{file2, offset})
-	btrfs.BtrfsExtendSame(same, len)
+	result, err := btrfs.BtrfsExtendSame(same, len)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Result: %v", result)
 }
 
 func main() {
