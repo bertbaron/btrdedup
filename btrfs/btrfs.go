@@ -11,19 +11,13 @@ import (
 	"log"
 	"unsafe"
 	"fmt"
-	"golang.org/x/sys/unix"
+	"math"
+	"github.com/bertbaron/btrdedup/ioctl"
 )
 
 const (
 	sameExtendOp = 0xc0189436 // IOWR(0x94, 54, 24)
 )
-
-func ioctl(fd, op, arg uintptr) error {
-	if _, _, err := unix.Syscall(unix.SYS_IOCTL, fd, op, arg); err != 0 {
-		return err
-	}
-	return nil
-}
 
 // size 32
 type sameExtendInfo struct {
@@ -43,14 +37,62 @@ type sameArgs struct {
 	reserved2      uint32
 }
 
-func messageSize(fileCount int) int {
+func sameMessageSize(fileCount int) int {
 	return 32 * fileCount - 8
+}
+
+type ioctlSearchKey struct {
+	/* which root are we searching.  0 is the tree of tree roots */
+	tree_id      uint64
+
+	/* keys returned will be >= min and <= max */
+	min_objectid uint64
+	max_objectid uint64
+
+	/* keys returned will be >= min and <= max */
+	min_offset   uint64
+	max_offset   uint64
+
+	/* max and min transids to search for */
+	min_transid  uint64
+	max_transid  uint64
+
+	/* keys returned will be >= min and <= max */
+	min_type     uint32
+	max_type     uint32
+
+	/*
+	 * how many items did userland ask for, and how many are we
+	 * returning
+	 */
+	nr_items     uint32
+
+	/* align to 64 bits */
+	unused       uint32
+
+	/* some extra for later */
+	unused1      uint64
+	unused2      uint64
+	unused3      uint64
+	unused4      uint64
+}
+
+const BTRFS_SEARCH_ARGS_BUFSIZE = (4096 - unsafe.Sizeof(ioctlSearchKey{}))
+
+/*
+ * the buf is an array of search headers where
+ * each header is followed by the actual item
+ * the type field is expanded to 32 bits for alignment
+ */
+type ioctlSearchArgs struct {
+	key ioctlSearchKey
+	buf [BTRFS_SEARCH_ARGS_BUFSIZE]byte;
 }
 
 // Allocates memory in C. Note that the C struct contains a dynamic array at the end, which is not possible in go,
 // therefore we return a go slice which is backed by that dynamic array in addition to the pointer to the args struct
 func allocate(fileCount int) (*sameArgs, []sameExtendInfo) {
-	size := C.size_t(messageSize(fileCount))
+	size := C.size_t(sameMessageSize(fileCount))
 	ptr := C.malloc(size) // allocate memory for sameArgs + (n-1)*sameExtendInfo
 	args := (*sameArgs)(ptr)
 
@@ -64,7 +106,37 @@ func free(args *sameArgs) {
 	C.free((unsafe.Pointer)(args))
 }
 
-func fillArgumentStructure(same []BtrfsSameExtendInfo, length uint64, args *sameArgs, info []sameExtendInfo) {
+/***************** Fragments *************************/
+
+func fragments(file *os.File) {
+	args := (*ioctlSearchArgs)(C.malloc(C.size_t(unsafe.Sizeof(ioctlSearchArgs{}))))
+	sk := args.key
+	sk.tree_id = 2;
+	sk.max_type = math.MaxUint32;
+	sk.min_type = 0;
+	sk.max_objectid = math.MaxUint64;
+	sk.max_offset = math.MaxUint64;
+	sk.max_transid = math.MaxUint64;
+	//
+	///* just a big number, doesn't matter much */
+	sk.nr_items = 4096;
+
+	log.Printf("SIZE: %v", unsafe.Sizeof(ioctlSearchArgs{}))
+	code := ioctl.IOWR(0x94, 17, 4096)
+	if err := ioctl.IOCTL(file.Fd(), code, (uintptr)((unsafe.Pointer)(args))); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Fragments: %v", args)
+
+}
+
+func Fragments(file *os.File) {
+	fragments(file)
+}
+
+/***************** Same extend info ******************/
+
+func fillSameArgumentStructure(same []BtrfsSameExtendInfo, length uint64, args *sameArgs, info []sameExtendInfo) {
 	args.logical_offset = same[0].LogicalOffset
 	args.length = length
 	args.dest_count = uint16(len(same) - 1)
@@ -101,7 +173,7 @@ func (result BtrfsSameResult) String() string {
 	return s
 }
 
-func makeResult(info []sameExtendInfo) []BtrfsSameResult {
+func makeSameResult(info []sameExtendInfo) []BtrfsSameResult {
 	results := make([]BtrfsSameResult, len(info))
 	for i, element := range info {
 		var result BtrfsSameResult
@@ -125,13 +197,13 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) ([]BtrfsSameResu
 	args, info := allocate(len(same))
 	defer free(args)
 
-	fillArgumentStructure(same, length, args, info)
+	fillSameArgumentStructure(same, length, args, info)
 
 	log.Printf("IN:  args: %v, info: %v", args, info)
-	if err := ioctl(same[0].File.Fd(), sameExtendOp, (uintptr)((unsafe.Pointer)(args))); err != nil {
+	if err := ioctl.IOCTL(same[0].File.Fd(), sameExtendOp, (uintptr)((unsafe.Pointer)(args))); err != nil {
 		return nil, err
 	}
 	log.Printf("OUT: args: %v, info: %v", args, info)
 
-	return makeResult(info), nil
+	return makeSameResult(info), nil
 }

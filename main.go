@@ -4,8 +4,8 @@ import (
 	"log"
 	"golang.org/x/sys/unix"
 	"os"
-	"github.com/bertbaron/btrdedup/btrfs"
 	"path/filepath"
+	"flag"
 )
 
 func c2s(ca [65]int8) string {
@@ -42,34 +42,10 @@ func printSystemInfo() {
 	}
 }
 
-func dedup(filename1, filename2 string, offset, len uint64) {
-	file1, err := os.OpenFile(filename1, os.O_RDWR, 0) // For read access.
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file1.Close()
-	file2, err := os.OpenFile(filename2, os.O_RDWR, 0) // For read access.
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer file2.Close()
-	log.Printf("Files: %v and %v", file1, file2)
 
-	same := make([]btrfs.BtrfsSameExtendInfo, 0)
-	same = append(same, btrfs.BtrfsSameExtendInfo{file1, offset})
-	same = append(same, btrfs.BtrfsSameExtendInfo{file2, offset})
-	result, err := btrfs.BtrfsExtendSame(same, len)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("Result: %v", result)
-}
 
 func main() {
-	log.Printf("Current working directory: %v", currentWorkdingDir())
-	printSystemInfo()
-	var M uint64 = 1024 * 1024
-	dedup("local/mnt/a1", "local/mnt/a2", 0 * M, 2 * M)
-	//dedup("local/mnt/a1", "local/mnt/a2", 10 * M, 10 * M)
-	//dedup("local/mnt/a1", "local/mnt/a2", 20 * M, 10 * M)
+	flag.Parse()
+	filenames := flag.Args()
+	Dedup(filenames)
 }

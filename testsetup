@@ -18,11 +18,10 @@ sudo losetup /dev/loop0 "$img"
 sudo mount /dev/loop0 "$mnt"
 sudo chmod 777 "$mnt"
 
-dd if=/dev/urandom of="$dir/a" bs=1M count=2
+dd if=/dev/urandom of="$mnt/a1" bs=1M count=2
 
-cp "$dir/a" "$mnt/a1"
-cp "$dir/a" "$mnt/a2"
-cp "$dir/a" "$mnt/a3"
-cp "$dir/a" "$mnt/a4"
-cp "$mnt/a1" "$mnt/a1a"
-cp "$mnt/a2" "$mnt/a2a"
+cp --reflink "$mnt/a1" "$mnt/a1a"
+
+cp "$mnt/a1" "$mnt/a2"
+cp --reflink "$mnt/a2" "$mnt/a2a"
+
