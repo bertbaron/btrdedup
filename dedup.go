@@ -29,7 +29,7 @@ func dedup(filenames []string, offset, len uint64) {
 		}
 		defer file.Close()
 		same = append(same, btrfs.BtrfsSameExtendInfo{file, offset})
-		btrfs.Fragments(file)
+		//btrfs.Fragments(file)
 	}
 
 	result, err := btrfs.BtrfsExtendSame(same, len)
