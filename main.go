@@ -2,50 +2,92 @@ package main
 
 import (
 	"log"
-	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
 	"flag"
+	"fmt"
+	"github.com/bertbaron/btrdedup/btrfs"
+	"sort"
 )
 
-func c2s(ca [65]int8) string {
-	s := make([]byte, len(ca))
-	var lens int
-	for ; lens < len(ca); lens++ {
-		if ca[lens] == 0 {
-			break
+type FileInformation struct {
+	name           string
+	size           int64
+	physicalOffset uint64
+}
+
+type BySize []FileInformation
+
+func (fis BySize) Len() int {
+	return len(fis)
+}
+func (fis BySize) Swap(i, j int) {
+	fis[i], fis[j] = fis[j], fis[i]
+}
+func (fis BySize) Less(i, j int) bool {
+	return fis[i].size < fis[j].size
+}
+
+var files = []FileInformation{}
+
+func isSymlink(path string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return (fi.Mode() & os.ModeSymlink) != 0
+}
+
+func collectFileInformation(path string) {
+	if isSymlink(path) {
+		return
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		log.Printf("skipping %s because of error %v", path, err)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		log.Fatal(err)
+	}
+	switch mode := fi.Mode(); {
+	case mode.IsDir():
+		elements, err := f.Readdirnames(0)
+		if err != nil {
+			log.Fatal(err)
 		}
-		s[lens] = uint8(ca[lens])
-	}
-	return string(s[0:lens])
-}
-
-func currentWorkdingDir() string {
-	finfo, err := os.Stat(".")
-	if err != nil {
-		log.Fatal("Error looking up current directory: %v", err)
-	}
-	path, err := filepath.Abs(finfo.Name())
-	if err != nil {
-		log.Fatal("Error looking up absolute path: %v", err)
-	}
-	return path
-}
-
-func printSystemInfo() {
-	buf := unix.Utsname{}
-	if err := unix.Uname(&buf); err != nil {
-		log.Printf("Error: %v", err)
-	} else {
-		log.Printf("Sysname: %v", c2s(buf.Sysname))
-		log.Printf("Release: %v", c2s(buf.Release))
+		for _, e := range elements {
+			collectFileInformation(filepath.Join(path, e))
+		}
+	case mode.IsRegular():
+		size := fi.Size()
+		physicalOffset := btrfs.PhysicalOffset(f)
+		fileInformation := FileInformation{path, size, physicalOffset}
+		files = append(files, fileInformation)
+		if len(files) % 10000 == 0 {
+			log.Printf("%d files read", len(files))
+		}
 	}
 }
 
+func sortFileInformation() {
+	log.Println("Sorting the files by size")
+	sort.Sort(BySize(files))
+}
 
+func printFileInformation() {
+	for _, fi := range files {
+		fmt.Printf("%d %s %d\n", fi.size, fi.name, fi.physicalOffset)
+	}
+}
 
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
-	Dedup(filenames)
+	collectFileInformation(filenames[0])
+	sortFileInformation()
+	printFileInformation()
+	//Dedup(filenames)
 }

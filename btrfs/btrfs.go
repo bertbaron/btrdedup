@@ -114,7 +114,7 @@ func makeSameResult(info []sameExtendInfo) []BtrfsSameResult {
 
 func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) ([]BtrfsSameResult, error) {
 	if len(same) < 2 {
-		log.Fatalf("Assertion error, there should be at least two files two deduplicate, found: %v", same)
+		log.Fatalf("Assertion error, there should be at least two files to deduplicate, found: %v", same)
 	}
 	args, info := allocate(len(same))
 	defer free(args)
