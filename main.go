@@ -13,7 +13,7 @@ import (
 
 type FilePath struct {
 	parent *FilePath
-	name string
+	name   string
 }
 
 func (p FilePath) Path() string {
@@ -78,14 +78,15 @@ func collectFileInformation(filePath FilePath) {
 		}
 	case mode.IsRegular():
 		size := fi.Size()
-		physicalOffset := btrfs.PhysicalOffset(f)
-		fileInformation := FileInformation{filePath, size, physicalOffset}
-		files = append(files, fileInformation)
-		if len(files) % 10000 == 0 {
-			stats := runtime.MemStats{}
-			runtime.ReadMemStats(&stats)
-			log.Printf("%d files read, memory: %v", len(files), stats.Alloc)
-
+		if size > 128 * 1024 {
+			physicalOffset := btrfs.PhysicalOffset(f)
+			fileInformation := FileInformation{filePath, size, physicalOffset}
+			files = append(files, fileInformation)
+			if len(files) % 10000 == 0 {
+				stats := runtime.MemStats{}
+				runtime.ReadMemStats(&stats)
+				log.Printf("%d files read, memory: %v", len(files), stats.Alloc)
+			}
 		}
 	}
 }
