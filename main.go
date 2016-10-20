@@ -104,7 +104,9 @@ func printFileInformation() {
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
-	collectFileInformation(FilePath{nil, filenames[0]})
+	for _, filename := range filenames {
+		collectFileInformation(FilePath{nil, filename})
+	}
 	sortFileInformation()
 	//printFileInformation()
 	//Dedup(filenames)
