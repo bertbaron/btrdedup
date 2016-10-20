@@ -11,8 +11,21 @@ import (
 	"runtime"
 )
 
+type FilePath struct {
+	parent *FilePath
+	name string
+}
+
+func (p FilePath) Path() string {
+	if p.parent == nil {
+		return p.name
+	} else {
+		return filepath.Join(p.parent.Path(), p.name)
+	}
+}
+
 type FileInformation struct {
-	name           string
+	path           FilePath
 	size           int64
 	physicalOffset uint64
 }
@@ -39,7 +52,8 @@ func isSymlink(path string) bool {
 	return (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0
 }
 
-func collectFileInformation(path string) {
+func collectFileInformation(filePath FilePath) {
+	path := filePath.Path()
 	if isSymlink(path) {
 		return
 	}
@@ -60,12 +74,12 @@ func collectFileInformation(path string) {
 			log.Fatal(err)
 		}
 		for _, e := range elements {
-			collectFileInformation(filepath.Join(path, e))
+			collectFileInformation(FilePath{&filePath, e})
 		}
 	case mode.IsRegular():
 		size := fi.Size()
 		physicalOffset := btrfs.PhysicalOffset(f)
-		fileInformation := FileInformation{path, size, physicalOffset}
+		fileInformation := FileInformation{filePath, size, physicalOffset}
 		files = append(files, fileInformation)
 		if len(files) % 10000 == 0 {
 			stats := runtime.MemStats{}
@@ -83,14 +97,14 @@ func sortFileInformation() {
 
 func printFileInformation() {
 	for _, fi := range files {
-		fmt.Printf("%d %s %d\n", fi.size, fi.name, fi.physicalOffset)
+		fmt.Printf("%d %s %d\n", fi.size, fi.path.Path(), fi.physicalOffset)
 	}
 }
 
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
-	collectFileInformation(filenames[0])
+	collectFileInformation(FilePath{nil, filenames[0]})
 	sortFileInformation()
 	//printFileInformation()
 	//Dedup(filenames)
