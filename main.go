@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"sort"
+	"runtime"
 )
 
 type FileInformation struct {
@@ -35,7 +36,7 @@ func isSymlink(path string) bool {
 	if err != nil {
 		log.Fatal(err)
 	}
-	return (fi.Mode() & os.ModeSymlink) != 0
+	return (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0
 }
 
 func collectFileInformation(path string) {
@@ -67,7 +68,10 @@ func collectFileInformation(path string) {
 		fileInformation := FileInformation{path, size, physicalOffset}
 		files = append(files, fileInformation)
 		if len(files) % 10000 == 0 {
-			log.Printf("%d files read", len(files))
+			stats := runtime.MemStats{}
+			runtime.ReadMemStats(&stats)
+			log.Printf("%d files read, memory: %v", len(files), stats.Alloc)
+
 		}
 	}
 }
@@ -88,6 +92,7 @@ func main() {
 	filenames := flag.Args()
 	collectFileInformation(filenames[0])
 	sortFileInformation()
-	printFileInformation()
+	//printFileInformation()
 	//Dedup(filenames)
+	log.Println("Done")
 }
