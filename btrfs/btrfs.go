@@ -1,7 +1,6 @@
 package btrfs
 
 /*
-#include <stdlib.h>
 #include <string.h>
 */
 import "C"
@@ -52,11 +51,6 @@ func allocate(fileCount int) (*sameArgs, []sameExtendInfo) {
 	extendInfo := (*[1 << 30]sameExtendInfo)(infoPtr)[:fileCount - 1]
 	return args, extendInfo
 }
-
-func free(args *sameArgs) {
-	C.free((unsafe.Pointer)(args))
-}
-
 
 func fillSameArgumentStructure(same []BtrfsSameExtendInfo, length uint64, args *sameArgs, info []sameExtendInfo) {
 	args.logical_offset = same[0].LogicalOffset
@@ -117,15 +111,15 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) ([]BtrfsSameResu
 		log.Fatalf("Assertion error, there should be at least two files to deduplicate, found: %v", same)
 	}
 	args, info := allocate(len(same))
-	defer free(args)
+	defer free((unsafe.Pointer)(args))
 
 	fillSameArgumentStructure(same, length, args, info)
 
-	log.Printf("IN:  args: %v, info: %v", args, info)
+	//log.Printf("IN:  args: %v, info: %v", args, info)
 	if err := ioctl.IOCTL(same[0].File.Fd(), sameExtendOp, (uintptr)((unsafe.Pointer)(args))); err != nil {
 		return nil, err
 	}
-	log.Printf("OUT: args: %v, info: %v", args, info)
+	//log.Printf("OUT: args: %v, info: %v", args, info)
 
 	return makeSameResult(info), nil
 }

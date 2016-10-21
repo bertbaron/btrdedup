@@ -79,7 +79,10 @@ func collectFileInformation(filePath FilePath) {
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > 128 * 1024 {
-			physicalOffset := btrfs.PhysicalOffset(f)
+			physicalOffset, err := btrfs.PhysicalOffset(f)
+			if err != nil {
+				log.Fatal(err)
+			}
 			fileInformation := FileInformation{filePath, size, physicalOffset}
 			files = append(files, fileInformation)
 			if len(files) % 10000 == 0 {
@@ -102,6 +105,34 @@ func printFileInformation() {
 	}
 }
 
+func submitForDedup(files []FileInformation) {
+	size := files[0].size
+	if len(files) == 1 {
+		log.Printf("Skipping size %d because there is only 1 file", size)
+		return
+	}
+	for _, file := range files {
+		if file.size != size {
+			log.Fatal("Unequal sized files submitted!")
+		}
+	}
+	filenames := make([]string, len(files))
+	sameOffset := true
+	physicalOffset := files[0].physicalOffset
+	for i, file := range files {
+		if file.physicalOffset != physicalOffset {
+			sameOffset = false
+		}
+		filenames[i] = file.path.Path()
+	}
+	if sameOffset {
+		log.Printf("Skipping size %d, all %d files have same physical offset", size, len(files))
+		return
+	}
+	log.Printf("Offering for deduplication: size: %d, count: %d\n", size, len(files))
+	dedup(filenames, 0, uint64(size))
+}
+
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
@@ -109,7 +140,21 @@ func main() {
 		collectFileInformation(FilePath{nil, filename})
 	}
 	sortFileInformation()
+
 	//printFileInformation()
+
+	start := 0
+	var size int64 = -1
+	for i, file := range files {
+		if file.size != size {
+			if size != -1 {
+				submitForDedup(files[start:i])
+			}
+			size = file.size
+			start = i
+		}
+	}
+	submitForDedup(files[start:len(files)])
 	//Dedup(filenames)
 	log.Println("Done")
 }

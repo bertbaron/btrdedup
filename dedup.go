@@ -23,20 +23,27 @@ func minFileSize(filenames []string) uint64 {
 func dedup(filenames []string, offset, len uint64) {
 	same := make([]btrfs.BtrfsSameExtendInfo, 0)
 	for _, filename := range filenames {
-		file, err := os.OpenFile(filename, os.O_RDWR, 0)
+		file, err := os.OpenFile(filename, os.O_RDONLY, 0)
 		if err != nil {
 			log.Fatal(err)
 		}
 		defer file.Close()
 		same = append(same, btrfs.BtrfsSameExtendInfo{file, offset})
-		//btrfs.PhysicalOffset(file)
 	}
 
 	result, err := btrfs.BtrfsExtendSame(same, len)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Result: %v", result)
+	var bytesDeduped uint64 = 0
+	dataDiffers := false
+	for _, r := range result {
+		dataDiffers = dataDiffers || r.DataDiffers
+		if r.BytesDeduped > bytesDeduped {
+			bytesDeduped = r.BytesDeduped
+		}
+	}
+	log.Printf("Result for length %d: same=%v, deduped=%d", len, !dataDiffers, bytesDeduped)
 }
 
 func Dedup(filenames []string) {
