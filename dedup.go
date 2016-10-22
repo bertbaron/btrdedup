@@ -10,7 +10,7 @@ const (
 	maxSize uint64 = 64 * 1024 * 1024
 )
 
-// returns true if the data was the same, false otherwise
+// returns true if the data was the successfull, false otherwise
 func dedup(filenames []string, offset, length uint64) bool {
 	same := make([]btrfs.BtrfsSameExtendInfo, 0)
 	for _, filename := range filenames {
@@ -24,7 +24,9 @@ func dedup(filenames []string, offset, length uint64) bool {
 
 	result, err := btrfs.BtrfsExtendSame(same, length)
 	if err != nil {
-		log.Fatal(err)
+		//log.Printf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err)
+		log.Fatalf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err) // for now we want to feel to identify issues
+		return false
 	}
 	var bytesDeduped uint64 = 0
 	dataDiffers := false
@@ -35,14 +37,7 @@ func dedup(filenames []string, offset, length uint64) bool {
 		}
 	}
 	log.Printf("Result for length %d: same=%v, deduped=%d\n", length, !dataDiffers, bytesDeduped)
-	return !dataDiffers
-}
-
-func max(x, y uint64) uint64 {
-	if x > y {
-		return x
-	}
-	return y
+	return !dataDiffers && bytesDeduped > 0
 }
 
 func Dedup(filenames []string, offset, length uint64) bool {

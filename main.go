@@ -99,7 +99,7 @@ func collectFileInformation(filePath FilePath) {
 }
 
 func sortFileInformation() {
-	log.Println("Sorting the files by size")
+	log.Printf("Sorting %d files by size", len(files))
 	sort.Sort(BySize(files))
 }
 
@@ -182,7 +182,9 @@ func main() {
 			start = i
 		}
 	}
-	submitForDedup(files[start:len(files)])
+	if start < len(files) {
+		submitForDedup(files[start:len(files)])
+	}
 	//Dedup(filenames)
 	log.Println("Done")
 }
