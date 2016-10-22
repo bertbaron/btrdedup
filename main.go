@@ -9,6 +9,7 @@ import (
 	"github.com/bertbaron/btrdedup/btrfs"
 	"sort"
 	"runtime"
+	"syscall"
 )
 
 type FilePath struct {
@@ -133,9 +134,33 @@ func submitForDedup(files []FileInformation) {
 	dedup(filenames, 0, uint64(size))
 }
 
+func checkOpenFileLimit() {
+	var rLimit syscall.Rlimit
+	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+	if err != nil {
+		log.Printf("Error Getting Rlimit ", err)
+	}
+	log.Printf("Current open file limit: %v", rLimit.Cur)
+	if rLimit.Cur < rLimit.Max {
+		rLimit.Cur = rLimit.Max
+		err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+		if err != nil {
+			log.Println("Error Setting Rlimit ", err)
+		}
+		err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
+		if err != nil {
+			log.Println("Error Getting Rlimit ", err)
+		}
+		log.Println("Open file limit increased to ", rLimit.Cur)
+	}
+}
+
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
+
+	checkOpenFileLimit()
+
 	for _, filename := range filenames {
 		collectFileInformation(FilePath{nil, filename})
 	}
