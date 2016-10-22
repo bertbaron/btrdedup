@@ -1,26 +1,17 @@
 package main
 
 import (
-	"math"
 	"os"
 	"log"
 	"github.com/bertbaron/btrdedup/btrfs"
 )
 
-func minFileSize(filenames []string) uint64 {
-	var minSize int64 = math.MaxInt64
-	for _, filename := range filenames {
-		stat, err := os.Stat(filename)
-		if (err != nil) {
-			log.Fatal(err)
-		}
-		log.Printf("Stats for %s: %v", filename, stat)
-		if stat.Size() < minSize { minSize = stat.Size() }
-	}
-	return uint64(minSize)
-}
+const (
+	maxSize uint64 = 64 * 1024 * 1024
+)
 
-func dedup(filenames []string, offset, len uint64) {
+// returns true if the data was the same, false otherwise
+func dedup(filenames []string, offset, length uint64) bool {
 	same := make([]btrfs.BtrfsSameExtendInfo, 0)
 	for _, filename := range filenames {
 		file, err := os.OpenFile(filename, os.O_RDONLY, 0)
@@ -31,7 +22,7 @@ func dedup(filenames []string, offset, len uint64) {
 		same = append(same, btrfs.BtrfsSameExtendInfo{file, offset})
 	}
 
-	result, err := btrfs.BtrfsExtendSame(same, len)
+	result, err := btrfs.BtrfsExtendSame(same, length)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -43,10 +34,29 @@ func dedup(filenames []string, offset, len uint64) {
 			bytesDeduped = r.BytesDeduped
 		}
 	}
-	log.Printf("Result for length %d: same=%v, deduped=%d", len, !dataDiffers, bytesDeduped)
+	log.Printf("Result for length %d: same=%v, deduped=%d\n", length, !dataDiffers, bytesDeduped)
+	return !dataDiffers
 }
 
-func Dedup(filenames []string) {
-	size := minFileSize(filenames)
-	dedup(filenames, 0, size)
+func max(x, y uint64) uint64 {
+	if x > y {
+		return x
+	}
+	return y
+}
+
+func Dedup(filenames []string, offset, length uint64) bool {
+	size := offset + length
+
+	max := maxSize / uint64(len(filenames))
+	same := true
+	for same && offset < size {
+		len := size - offset
+		if len > max {
+			len = max &^ 0xF000
+		}
+		same = same && dedup(filenames, offset, len)
+		offset = offset + len
+	}
+	return same
 }

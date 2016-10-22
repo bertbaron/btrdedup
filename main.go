@@ -12,6 +12,9 @@ import (
 	"syscall"
 )
 
+const (
+	minSize int64 = 1024 * 1024
+)
 type FilePath struct {
 	parent *FilePath
 	name   string
@@ -79,7 +82,7 @@ func collectFileInformation(filePath FilePath) {
 		}
 	case mode.IsRegular():
 		size := fi.Size()
-		if size > 128 * 1024 {
+		if size > minSize {
 			physicalOffset, err := btrfs.PhysicalOffset(f)
 			if err != nil {
 				log.Fatal(err)
@@ -130,8 +133,8 @@ func submitForDedup(files []FileInformation) {
 		log.Printf("Skipping size %d, all %d files have same physical offset", size, len(files))
 		return
 	}
-	log.Printf("Offering for deduplication: size: %d, count: %d\n", size, len(files))
-	dedup(filenames, 0, uint64(size))
+	log.Printf("Offering for deduplication: %s of size %d and %d other files\n", filenames[0], size, len(files) - 1)
+	Dedup(filenames, 0, uint64(size))
 }
 
 func checkOpenFileLimit() {
