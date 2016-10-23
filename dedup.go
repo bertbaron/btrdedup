@@ -24,8 +24,8 @@ func dedup(filenames []string, offset, length uint64) bool {
 
 	result, err := btrfs.BtrfsExtendSame(same, length)
 	if err != nil {
-		//log.Printf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err)
-		log.Fatalf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err) // for now we want to feel to identify issues
+		log.Printf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err)
+		//log.Fatalf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err) // for now we want to feel to identify issues
 		return false
 	}
 	var bytesDeduped uint64 = 0
@@ -48,7 +48,7 @@ func Dedup(filenames []string, offset, length uint64) bool {
 	for same && offset < size {
 		len := size - offset
 		if len > max {
-			len = max &^ 0xF000
+			len = max &^ 0x0FFF // multiple of 4k
 		}
 		same = same && dedup(filenames, offset, len)
 		offset = offset + len
