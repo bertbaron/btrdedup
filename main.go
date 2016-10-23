@@ -10,11 +10,13 @@ import (
 	"sort"
 	"runtime"
 	"syscall"
+	"github.com/bertbaron/btrdedup/util"
 )
 
 const (
 	minSize int64 = 1024 * 1024
 )
+
 type FilePath struct {
 	parent *FilePath
 	name   string
@@ -36,14 +38,25 @@ type FileInformation struct {
 
 type BySize []FileInformation
 
+// sorting
 func (fis BySize) Len() int {
 	return len(fis)
 }
+// sorting
 func (fis BySize) Swap(i, j int) {
 	fis[i], fis[j] = fis[j], fis[i]
 }
+// sorting
 func (fis BySize) Less(i, j int) bool {
 	return fis[i].size < fis[j].size
+}
+// partitioning
+func (fis BySize) Size() int {
+	return len(fis)
+}
+// partitioning
+func (fis BySize) Same(i, j int) bool {
+	return fis[i].size == fis[j].size
 }
 
 var files = []FileInformation{}
@@ -156,6 +169,10 @@ func checkOpenFileLimit() {
 		}
 		log.Println("Open file limit increased to ", rLimit.Cur)
 	}
+}
+
+func doIt() {
+	util.Partition(BySize(files))
 }
 
 func main() {
