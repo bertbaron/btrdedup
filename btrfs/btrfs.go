@@ -94,7 +94,7 @@ func makeSameResult(info []sameExtendInfo) []BtrfsSameResult {
 	for i, element := range info {
 		var result BtrfsSameResult
 		if (element.status < 0) {
-			errMsg := C.GoString(C.strerror(C.int(-element.status)))
+			errMsg := C.GoString(C.strerror(C.int(-element.status))) // TODO Do we need to free this?
 			result = BtrfsSameResult{&errMsg, false, 0}
 		} else if (element.status == 1) {
 			result = BtrfsSameResult{nil, true, 0}
