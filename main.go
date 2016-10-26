@@ -5,9 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"flag"
-	"fmt"
 	"github.com/bertbaron/btrdedup/btrfs"
-	"sort"
 	"runtime"
 	"syscall"
 	"github.com/bertbaron/btrdedup/util"
@@ -38,25 +36,14 @@ type FileInformation struct {
 
 type BySize []FileInformation
 
-// sorting
 func (fis BySize) Len() int {
 	return len(fis)
 }
-// sorting
 func (fis BySize) Swap(i, j int) {
 	fis[i], fis[j] = fis[j], fis[i]
 }
-// sorting
 func (fis BySize) Less(i, j int) bool {
 	return fis[i].size < fis[j].size
-}
-// partitioning
-func (fis BySize) Size() int {
-	return len(fis)
-}
-// partitioning
-func (fis BySize) Same(i, j int) bool {
-	return fis[i].size == fis[j].size
 }
 
 var files = []FileInformation{}
@@ -64,8 +51,9 @@ var files = []FileInformation{}
 func isSymlink(path string) bool {
 	fi, err := os.Lstat(path)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Error using os.Lstat on file %s: %v", path, err)
 	}
+
 	return (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0
 }
 
@@ -82,13 +70,15 @@ func collectFileInformation(filePath FilePath) {
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error using f.Stat on file %s: %v", path, err)
+		return
 	}
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
 		elements, err := f.Readdirnames(0)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatal("Error while reading the contents of directory %s: %v", path, err)
+			return
 		}
 		for _, e := range elements {
 			collectFileInformation(FilePath{&filePath, e})
@@ -98,7 +88,8 @@ func collectFileInformation(filePath FilePath) {
 		if size > minSize {
 			physicalOffset, err := btrfs.PhysicalOffset(f)
 			if err != nil {
-				log.Fatal(err)
+				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
+				return
 			}
 			fileInformation := FileInformation{filePath, size, physicalOffset}
 			files = append(files, fileInformation)
@@ -111,17 +102,7 @@ func collectFileInformation(filePath FilePath) {
 	}
 }
 
-func sortFileInformation() {
-	log.Printf("Sorting %d files by size", len(files))
-	sort.Sort(BySize(files))
-}
-
-func printFileInformation() {
-	for _, fi := range files {
-		fmt.Printf("%d %s %d\n", fi.size, fi.path.Path(), fi.physicalOffset)
-	}
-}
-
+// Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []FileInformation) {
 	size := files[0].size
 	if len(files) == 1 {
@@ -150,6 +131,7 @@ func submitForDedup(files []FileInformation) {
 	Dedup(filenames, 0, uint64(size))
 }
 
+// Increase open file limit if possible, currently simply to the limit. We may want to make an option for this...
 func checkOpenFileLimit() {
 	var rLimit syscall.Rlimit
 	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
@@ -171,10 +153,6 @@ func checkOpenFileLimit() {
 	}
 }
 
-func doIt() {
-	util.Partition(BySize(files))
-}
-
 func main() {
 	flag.Parse()
 	filenames := flag.Args()
@@ -184,24 +162,9 @@ func main() {
 	for _, filename := range filenames {
 		collectFileInformation(FilePath{nil, filename})
 	}
-	sortFileInformation()
 
-	//printFileInformation()
-
-	start := 0
-	var size int64 = -1
-	for i, file := range files {
-		if file.size != size {
-			if size != -1 {
-				submitForDedup(files[start:i])
-			}
-			size = file.size
-			start = i
-		}
+	for idxRange := range util.SortAndPartition(BySize(files)) {
+		submitForDedup(files[idxRange.Low:idxRange.High])
 	}
-	if start < len(files) {
-		submitForDedup(files[start:len(files)])
-	}
-	//Dedup(filenames)
 	log.Println("Done")
 }
