@@ -5,14 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"flag"
-	"github.com/bertbaron/btrdedup/btrfs"
 	"runtime"
 	"syscall"
+	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/bertbaron/btrdedup/util"
 )
 
 const (
-	minSize int64 = 1024 * 1024
+	minSize int64 = 4 * 1024
 )
 
 type FilePath struct {
@@ -48,33 +48,26 @@ func (fis BySize) Less(i, j int) bool {
 
 var files = []FileInformation{}
 
-func isSymlink(path string) bool {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		log.Fatal("Error using os.Lstat on file %s: %v", path, err)
-	}
-
-	return (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0
-}
-
 func collectFileInformation(filePath FilePath) {
 	path := filePath.Path()
-	if isSymlink(path) {
-		return
-	}
-	f, err := os.Open(path)
+	fi, err := os.Lstat(path)
 	if err != nil {
-		log.Printf("skipping %s because of error %v", path, err)
+		log.Printf("Error using os.Lstat on file %s: %v", path, err)
 		return
 	}
-	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		log.Printf("Error using f.Stat on file %s: %v", path, err)
+
+	if (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0 {
 		return
 	}
+
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
+		f, err := os.Open(path)
+		if err != nil {
+			log.Printf("skipping %s because of error %v", path, err)
+			return
+		}
+		defer f.Close()
 		elements, err := f.Readdirnames(0)
 		if err != nil {
 			log.Fatal("Error while reading the contents of directory %s: %v", path, err)
@@ -86,6 +79,12 @@ func collectFileInformation(filePath FilePath) {
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > minSize {
+			f, err := os.Open(path)
+			if err != nil {
+				log.Printf("skipping %s because of error %v", path, err)
+				return
+			}
+			defer f.Close()
 			physicalOffset, err := btrfs.PhysicalOffset(f)
 			if err != nil {
 				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
