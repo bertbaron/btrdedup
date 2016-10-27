@@ -48,6 +48,20 @@ func (fis BySize) Less(i, j int) bool {
 
 var files = []FileInformation{}
 
+// readDirNames reads the directory named by dirname
+func readDirNames(dirname string) ([]string, error) {
+	f, err := os.Open(dirname)
+	if err != nil {
+		return nil, err
+	}
+	names, err := f.Readdirnames(-1)
+	f.Close()
+	if err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
 func collectFileInformation(filePath FilePath) {
 	path := filePath.Path()
 	fi, err := os.Lstat(path)
@@ -62,13 +76,7 @@ func collectFileInformation(filePath FilePath) {
 
 	switch mode := fi.Mode(); {
 	case mode.IsDir():
-		f, err := os.Open(path)
-		if err != nil {
-			log.Printf("skipping %s because of error %v", path, err)
-			return
-		}
-		defer f.Close()
-		elements, err := f.Readdirnames(0)
+		elements, err := readDirNames(path)
 		if err != nil {
 			log.Fatal("Error while reading the contents of directory %s: %v", path, err)
 			return
