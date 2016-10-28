@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/bertbaron/btrdedup/util"
+	"github.com/pkg/errors"
 )
 
 const (
@@ -52,14 +53,11 @@ var files = []FileInformation{}
 func readDirNames(dirname string) ([]string, error) {
 	f, err := os.Open(dirname)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "open dir")
 	}
 	names, err := f.Readdirnames(-1)
 	f.Close()
-	if err != nil {
-		return nil, err
-	}
-	return names, nil
+	return names, errors.Wrap(err, "reading dir names")
 }
 
 func collectFileInformation(filePath FilePath) {
@@ -78,7 +76,7 @@ func collectFileInformation(filePath FilePath) {
 	case mode.IsDir():
 		elements, err := readDirNames(path)
 		if err != nil {
-			log.Fatal("Error while reading the contents of directory %s: %v", path, err)
+			log.Printf("Error while reading the contents of directory %s: %v", path, err)
 			return
 		}
 		for _, e := range elements {
@@ -110,7 +108,7 @@ func collectFileInformation(filePath FilePath) {
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
-func submitForDedup(files []FileInformation) {
+func submitForDedup(files []FileInformation, noact bool) {
 	size := files[0].size
 	if len(files) == 1 {
 		log.Printf("Skipping size %d because there is only 1 file", size)
@@ -134,12 +132,16 @@ func submitForDedup(files []FileInformation) {
 		log.Printf("Skipping size %d, all %d files have same physical offset", size, len(files))
 		return
 	}
-	log.Printf("Offering for deduplication: %s of size %d and %d other files\n", filenames[0], size, len(files) - 1)
-	Dedup(filenames, 0, uint64(size))
+	if !noact {
+		log.Printf("Offering for deduplication: %s of size %d and %d other files\n", filenames[0], size, len(files) - 1)
+		Dedup(filenames, 0, uint64(size))
+	} else {
+		log.Printf("Candidate for deduplication: %s of size %d and %d other files\n", filenames[0], size, len(files) - 1)
+	}
 }
 
 // Increase open file limit if possible, currently simply to the limit. We may want to make an option for this...
-func checkOpenFileLimit() {
+func updateOpenFileLimit() {
 	var rLimit syscall.Rlimit
 	err := syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 	if err != nil {
@@ -161,17 +163,18 @@ func checkOpenFileLimit() {
 }
 
 func main() {
+	noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
 	flag.Parse()
 	filenames := flag.Args()
 
-	checkOpenFileLimit()
+	updateOpenFileLimit()
 
 	for _, filename := range filenames {
 		collectFileInformation(FilePath{nil, filename})
 	}
 
 	for idxRange := range util.SortAndPartition(BySize(files)) {
-		submitForDedup(files[idxRange.Low:idxRange.High])
+		submitForDedup(files[idxRange.Low:idxRange.High], *noact)
 	}
 	log.Println("Done")
 }
