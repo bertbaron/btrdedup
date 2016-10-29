@@ -3,101 +3,34 @@ package main
 import (
 	"log"
 	"os"
-	"path/filepath"
 	"flag"
-	"runtime"
 	"syscall"
 	"github.com/bertbaron/btrdedup/btrfs"
-	"github.com/bertbaron/btrdedup/util"
 	"github.com/pkg/errors"
 	"crypto/md5"
-	"sort"
-	"fmt"
-	"encoding/hex"
 	"math"
+	"path/filepath"
+	"io/ioutil"
+	"encoding/json"
+	"bufio"
+	"strconv"
+	"os/exec"
+	"strings"
+	"encoding/hex"
 )
 
 const (
 	minSize int64 = 4 * 1024
 )
 
-type FilePath struct {
-	parent *FilePath
-	name   string
-}
-
-func (p FilePath) Path() string {
-	if p.parent == nil {
-		return p.name
-	} else {
-		return filepath.Join(p.parent.Path(), p.name)
-	}
-}
-
 type FileInformation struct {
-	path           FilePath
-	size           int64
+	Path           string
 	physicalOffset uint64
+	Size           int64
 	csum           *[16]byte
 }
 
-type BlockInformation struct {
-	physicalOffset uint64
-	fileInfo       *FileInformation // just one file having this as its first block
-}
 
-type BySize []FileInformation
-type ByOffset []FileInformation
-type ByChecksum []FileInformation
-
-func (fis BySize) Len() int {
-	return len(fis)
-}
-func (fis BySize) Swap(i, j int) {
-	fis[i], fis[j] = fis[j], fis[i]
-}
-func (fis BySize) Less(i, j int) bool {
-	return fis[i].size < fis[j].size
-}
-
-func (fis ByOffset) Len() int {
-	return len(fis)
-}
-func (fis ByOffset) Swap(i, j int) {
-	fis[i], fis[j] = fis[j], fis[i]
-}
-func (fis ByOffset) Less(i, j int) bool {
-	return fis[i].physicalOffset < fis[j].physicalOffset
-}
-
-func (fis ByChecksum) Len() int {
-	return len(fis)
-}
-func (fis ByChecksum) Swap(i, j int) {
-	fis[i], fis[j] = fis[j], fis[i]
-}
-func (fis ByChecksum) Less(i, j int) bool {
-	a := fis[i].csum
-	b := fis[j].csum
-	if a == nil {
-		return true
-	}
-	if b == nil {
-		return false
-	}
-	for i, v := range a {
-		if v < b[i] {
-			return true
-		}
-		if v > b[i] {
-			return false
-		}
-	}
-	return false
-	//return *fis[i].csum < *fis[j].csum
-}
-
-var files = []FileInformation{}
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -110,8 +43,7 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, errors.Wrap(err, "reading dir names failed")
 }
 
-func readFileMeta(filePath FilePath, size int64) (*FileInformation, error) {
-	path := filePath.Path()
+func readFileMeta(path string) (*FileInformation, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "open file failed")
@@ -122,7 +54,7 @@ func readFileMeta(filePath FilePath, size int64) (*FileInformation, error) {
 		return nil, errors.Wrap(err, "Faild to read physical offset of file")
 	}
 	// We also need to ensure the first block is at least 4k, even though this will probably always be the case
-	return &FileInformation{filePath, size, physicalOffset, nil}, nil
+	return &FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
 func readChecksum(path string) (*[16]byte, error) {
@@ -144,24 +76,37 @@ func readChecksum(path string) (*[16]byte, error) {
 	return &csum, nil
 }
 
-func readChecksums() {
-	for idxRange := range util.SortAndPartition(ByOffset(files)) {
-		path := files[idxRange.Low].path.Path()
-		csum, err := readChecksum(path)
-		if err != nil {
-			log.Printf("Error creating checksum for first block of file %s, %v", path, err)
-			// We should somehow filter these to nog have to deel with nils later
-		} else {
-			subslice := files[idxRange.Low:idxRange.High]
-			for idx, _ := range subslice {
-				subslice[idx].csum = csum
-			}
-		}
+func dumpAsJson(prefix string, fileInfo *FileInformation, outfile *bufio.Writer) {
+	bytes, err := json.Marshal(fileInfo)
+	if err != nil {
+		log.Printf("Error converting file information to Json")
+		return
+	}
+	outfile.WriteString(prefix)
+	outfile.WriteByte(' ')
+	outfile.Write(bytes)
+	outfile.WriteByte('\n')
+}
+
+// PRE: all files start at the same offset
+func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
+	if len(files) == 0 {
+		return
+	}
+
+	path := files[0].Path
+	csum, err := readChecksum(path)
+	if err != nil {
+		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
+		return
+	}
+	for _, file := range files {
+		dumpAsJson(hex.EncodeToString(csum[:]), &file, outfile)
 	}
 }
 
-func collectFileInformation(filePath FilePath) {
-	path := filePath.Path()
+// todo: use filepath.Walk
+func collectFileInformation(path string, outfile *bufio.Writer) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -180,30 +125,25 @@ func collectFileInformation(filePath FilePath) {
 			return
 		}
 		for _, e := range elements {
-			collectFileInformation(FilePath{&filePath, e})
+			collectFileInformation(filepath.Join(path, e), outfile)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > minSize {
-			fileInformation, err := readFileMeta(filePath, size)
+			fileInformation, err := readFileMeta(path)
 			if err != nil {
 				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
 				return
 			}
-			files = append(files, *fileInformation)
-			if len(files) % 10000 == 0 {
-				stats := runtime.MemStats{}
-				runtime.ReadMemStats(&stats)
-				log.Printf("%d files read, memory: %v", len(files), stats.Alloc)
-			}
+			fileInformation.Size = size
+			dumpAsJson(strconv.FormatInt(int64(fileInformation.physicalOffset), 10), fileInformation, outfile)
 		}
 	}
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []FileInformation, noact bool) {
-	if len(files) == 1 {
-		log.Printf("Skipping file because there is no other file starting with the same checksum")
+	if len(files) < 2 {
 		return
 	}
 	if files[0].csum == nil {
@@ -211,10 +151,10 @@ func submitForDedup(files []FileInformation, noact bool) {
 	}
 
 	// currently we assume that the files are equal up to the size of the smallest file
-	size := math.MaxInt64
+	var size int64 = math.MaxInt64
 	for _, file := range files {
-		if file.size < size {
-			size = file.size
+		if file.Size < size {
+			size = file.Size
 		}
 	}
 
@@ -225,7 +165,7 @@ func submitForDedup(files []FileInformation, noact bool) {
 		if file.physicalOffset != physicalOffset {
 			sameOffset = false
 		}
-		filenames[i] = file.path.Path()
+		filenames[i] = file.Path
 	}
 	if sameOffset {
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
@@ -261,33 +201,95 @@ func updateOpenFileLimit() {
 	}
 }
 
-func printFileInformation() {
-	for _, file := range files {
-		var csum [16]byte = *file.csum
-		fmt.Printf("%s - %s\n", hex.EncodeToString(csum[:]), file.path.Path())
+func sort(file string) {
+	log.Printf("Sorting %s", file)
+	command := exec.Command("sort", file, "-o", file)
+	err := command.Run()
+	if err != nil {
+		log.Fatal("Failed to sort %s", file)
 	}
+	log.Printf("Sorted %s", file)
+}
+
+func pass1(filenames []string) string {
+	outfile, err := ioutil.TempFile("", "btrdedup")
+	if err != nil {
+		log.Fatalf("Unable to create temprary file")
+	}
+	log.Printf("Pass 1, writing to %s", outfile.Name())
+	writer := bufio.NewWriter(outfile)
+	for _, filename := range filenames {
+		collectFileInformation(filename, writer)
+	}
+	writer.Flush()
+	outfile.Close()
+
+	sort(outfile.Name())
+	return outfile.Name()
+}
+
+func parse(line string) FileInformation {
+	fileInfo := FileInformation{}
+	json.Unmarshal([]byte(line), &fileInfo)
+	return fileInfo
+}
+
+func pass2(infileName string) string {
+	infile, err := os.Open(infileName)
+	if err != nil {
+		log.Fatal("Failed to open %s", infileName)
+	}
+	defer infile.Close()
+	outfile, err := ioutil.TempFile("", "btrdedup")
+	if err != nil {
+		log.Fatalf("Unable to create temprary file")
+	}
+	log.Printf("Pass 2, writing to %s", outfile.Name())
+	writer := bufio.NewWriter(outfile)
+
+	scanner := bufio.NewScanner(infile)
+	lastOffset := ""
+	files := make([]FileInformation, 0)
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, " ")
+		offset := line[:idx]
+		fileInfo := parse(line[idx:])
+		if (offset != lastOffset) {
+			dumpChecksums(files, writer)
+			files = files[0:0]
+		}
+		files = append(files, fileInfo)
+	}
+	dumpChecksums(files, writer)
+
+	writer.Flush()
+	outfile.Close()
+
+	sort(outfile.Name())
+	return outfile.Name()
 }
 
 func main() {
-	noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
+	//noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
 	flag.Parse()
 	filenames := flag.Args()
 
 	updateOpenFileLimit()
 
-	for _, filename := range filenames {
-		collectFileInformation(FilePath{nil, filename})
-	}
+	filename := pass1(filenames)
 
-	readChecksums()
+	pass2(filename)
 
-	log.Println("Sorting by checksum")
-	sort.Sort(ByChecksum(files))
-	log.Println("Done sorting by checksum")
-	printFileInformation()
-
-	for idxRange := range util.SortAndPartition(ByChecksum(files)) {
-		submitForDedup(files[idxRange.Low:idxRange.High], *noact)
-	}
+	//readChecksums()
+	//
+	//log.Println("Sorting by checksum")
+	//sort.Sort(ByChecksum(files))
+	//log.Println("Done sorting by checksum")
+	//printFileInformation()
+	//
+	//for idxRange := range util.SortAndPartition(ByChecksum(files)) {
+	//	submitForDedup(files[idxRange.Low:idxRange.High], *noact)
+	//}
 	log.Println("Done")
 }
