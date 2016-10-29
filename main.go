@@ -76,8 +76,14 @@ func (fis ByChecksum) Swap(i, j int) {
 	fis[i], fis[j] = fis[j], fis[i]
 }
 func (fis ByChecksum) Less(i, j int) bool {
-	a := *fis[i].csum
-	b := *fis[j].csum
+	a := fis[i].csum
+	b := fis[j].csum
+	if a == nil {
+		return true
+	}
+	if b == nil {
+		return false
+	}
 	for i, v := range a {
 		if v < b[i] {
 			return true
@@ -143,7 +149,7 @@ func readChecksums() {
 		csum, err := readChecksum(path)
 		if err != nil {
 			log.Printf("Error creating checksum for first block of file %s, %v", path, err)
-			// FIXME SOMEHOW REMOVE THESE FROM FILES, WE DON'T WANT TO PANIC ON nil
+			// We should somehow filter these to nog have to deel with nils later
 		} else {
 			subslice := files[idxRange.Low:idxRange.High]
 			for idx, _ := range subslice {
@@ -198,6 +204,9 @@ func submitForDedup(files []FileInformation, noact bool) {
 	if len(files) == 1 {
 		log.Printf("Skipping file because there is no other file starting with the same checksum")
 		return
+	}
+	if files[0].csum == nil {
+		return // for now we have to deel with nil here...
 	}
 
 	// currently we assume that the files are equal up to the size of the smallest file
