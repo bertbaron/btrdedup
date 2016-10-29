@@ -14,6 +14,7 @@ import (
 	"sort"
 	"fmt"
 	"encoding/hex"
+	"math"
 )
 
 const (
@@ -210,7 +211,7 @@ func submitForDedup(files []FileInformation, noact bool) {
 	}
 
 	// currently we assume that the files are equal up to the size of the smallest file
-	size := int64(0)
+	size := math.MaxInt64
 	for _, file := range files {
 		if file.size < size {
 			size = file.size
@@ -227,7 +228,7 @@ func submitForDedup(files []FileInformation, noact bool) {
 		filenames[i] = file.path.Path()
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], size, len(files) - 1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
 		return
 	}
 	if !noact {
