@@ -270,26 +270,43 @@ func pass2(infileName string) string {
 	return outfile.Name()
 }
 
+func pass3(infileName string, noact bool) {
+	infile, err := os.Open(infileName)
+	if err != nil {
+		log.Fatal("Failed to open %s", infileName)
+	}
+	defer infile.Close()
+	log.Printf("Pass 3, deduplucating files")
+
+	scanner := bufio.NewScanner(infile)
+	lastHash := ""
+	files := make([]FileInformation, 0)
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, " ")
+		hash := line[:idx]
+		fileInfo := parse(line[idx:])
+		if (hash != lastHash) {
+			submitForDedup(files, noact)
+			files = files[0:0]
+		}
+		files = append(files, fileInfo)
+	}
+	submitForDedup(files, noact)
+}
+
 func main() {
-	//noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
+	noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
 	flag.Parse()
 	filenames := flag.Args()
 
 	updateOpenFileLimit()
 
-	filename := pass1(filenames)
+	tmpfile1 := pass1(filenames)
 
-	pass2(filename)
+	tmpfile2 := pass2(tmpfile1)
 
-	//readChecksums()
-	//
-	//log.Println("Sorting by checksum")
-	//sort.Sort(ByChecksum(files))
-	//log.Println("Done sorting by checksum")
-	//printFileInformation()
-	//
-	//for idxRange := range util.SortAndPartition(ByChecksum(files)) {
-	//	submitForDedup(files[idxRange.Low:idxRange.High], *noact)
-	//}
+	pass3(tmpfile2, *noact)
+
 	log.Println("Done")
 }
