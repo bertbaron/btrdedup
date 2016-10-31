@@ -47,7 +47,8 @@ func serialize(fileInfo FileInformation, withCsum bool) string {
 }
 
 func deserialize(line string) (*FileInformation, error) {
-	fields := strings.Fields(line)
+	//fields := strings.Fields(line)
+	fields := strings.Split(line, " ")
 	if len(fields) < 3 {
 		return nil, errors.Errorf("Too few fields in line: %s", line)
 	}
