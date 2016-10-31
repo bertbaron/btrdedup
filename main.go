@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/base64"
 	"flag"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/pkg/errors"
@@ -31,6 +32,12 @@ type FileInformation struct {
 	physicalOffset uint64
 	Size           int64
 	csum           *[16]byte
+}
+
+func serializePhase1(fileInfo *FileInformation) string {
+	offset := strconv.FormatInt(int64(fileInfo.physicalOffset), 10)
+	path := base64.StdEncoding.EncodeToString([]byte(fileInfo.Path))
+	return offset + " " + path + " " + strconv.FormatInt(fileInfo.Size, 10)
 }
 
 // readDirNames reads the directory named by dirname
@@ -157,7 +164,8 @@ func collectFileInformation(path string, outfile *bufio.Writer) {
 				return
 			}
 			fileInformation.Size = size
-			dumpAsJson(strconv.FormatInt(int64(fileInformation.physicalOffset), 10), fileInformation, outfile)
+			serializePhase1(fileInformation)
+			//dumpAsJson(strconv.FormatInt(int64(fileInformation.physicalOffset), 10), fileInformation, outfile)
 		}
 	}
 }
