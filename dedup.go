@@ -1,9 +1,9 @@
 package main
 
 import (
-	"os"
-	"log"
 	"github.com/bertbaron/btrdedup/btrfs"
+	"log"
+	"os"
 )
 
 const (
@@ -24,7 +24,7 @@ func dedup(filenames []string, offset, length uint64) bool {
 
 	result, err := btrfs.BtrfsExtendSame(same, length)
 	if err != nil {
-		log.Printf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err)
+		log.Printf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames)-1, err)
 		//log.Fatalf("Error while deduplicating %s and %d other files: %v", filenames[0], len(filenames) - 1, err) // for now we want to feel to identify issues
 		return false
 	}

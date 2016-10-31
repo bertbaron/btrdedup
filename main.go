@@ -1,23 +1,25 @@
 package main
 
 import (
-	"log"
-	"os"
+	"bufio"
+	"encoding/hex"
+	"encoding/json"
 	"flag"
-	"syscall"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/pkg/errors"
-	"math"
-	"path/filepath"
-	"io/ioutil"
-	"encoding/json"
-	"bufio"
-	"strconv"
-	"os/exec"
-	"strings"
-	"encoding/hex"
 	"github.com/spaolacci/murmur3"
-	"fmt"
+	//"crypto/md5"
+	//"hash/fnv"
+	"io/ioutil"
+	"log"
+	"math"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime/pprof"
+	"strconv"
+	"strings"
+	"syscall"
 )
 
 const (
@@ -30,8 +32,6 @@ type FileInformation struct {
 	Size           int64
 	csum           *[16]byte
 }
-
-
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -67,12 +67,14 @@ func putInt(data []byte, value uint64) {
 }
 
 func makeChecksum(data []byte) [16]byte {
-	//return md5.Sum(buffer)
+	//hasher := fnv.New64()
+	//hasher.Write(data)
+	//csum1 := hasher.Sum64()
+	//return md5.Sum(data)
 	csum1, csum2 := murmur3.Sum128(data)
 	var bytes [16]byte
 	putInt(bytes[0:8], csum1)
 	putInt(bytes[8:16], csum2)
-	fmt.Printf("%d:%d > %s\n", csum1, csum2, hex.EncodeToString(bytes[:]))
 	return bytes
 }
 
@@ -187,14 +189,14 @@ func submitForDedup(files []FileInformation, noact bool) {
 		filenames[i] = file.Path
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
@@ -274,7 +276,7 @@ func pass2(infileName string) string {
 		idx := strings.Index(line, " ")
 		offset := line[:idx]
 		fileInfo := parse(line[idx:])
-		if (offset != lastOffset) {
+		if offset != lastOffset {
 			dumpChecksums(files, writer)
 			files = files[0:0]
 		}
@@ -305,7 +307,7 @@ func pass3(infileName string, noact bool) {
 		idx := strings.Index(line, " ")
 		hash := line[:idx]
 		fileInfo := parse(line[idx:])
-		if (hash != lastHash) {
+		if hash != lastHash {
 			submitForDedup(files, noact)
 			files = files[0:0]
 		}
@@ -316,7 +318,18 @@ func pass3(infileName string, noact bool) {
 
 func main() {
 	noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
+	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	flag.Parse()
+
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	filenames := flag.Args()
 
 	updateOpenFileLimit()
