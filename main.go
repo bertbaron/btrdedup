@@ -7,7 +7,6 @@ import (
 	"syscall"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/pkg/errors"
-	"crypto/md5"
 	"math"
 	"path/filepath"
 	"io/ioutil"
@@ -17,6 +16,8 @@ import (
 	"os/exec"
 	"strings"
 	"encoding/hex"
+	"github.com/spaolacci/murmur3"
+	"fmt"
 )
 
 const (
@@ -57,6 +58,24 @@ func readFileMeta(path string) (*FileInformation, error) {
 	return &FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
+// Most simple translation of uint64 into a byte slice. Yes I know its reversed, but that doesn't matter for us
+func putInt(data []byte, value uint64) {
+	for i := 0; i < 8; i++ {
+		data[i] = byte(value & 0xFF)
+		value >>= 8
+	}
+}
+
+func makeChecksum(data []byte) [16]byte {
+	//return md5.Sum(buffer)
+	csum1, csum2 := murmur3.Sum128(data)
+	var bytes [16]byte
+	putInt(bytes[0:8], csum1)
+	putInt(bytes[8:16], csum2)
+	fmt.Printf("%d:%d > %s\n", csum1, csum2, hex.EncodeToString(bytes[:]))
+	return bytes
+}
+
 func readChecksum(path string) (*[16]byte, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -72,7 +91,7 @@ func readChecksum(path string) (*[16]byte, error) {
 		// TODO we should probably need to repeat reading, but for now we assume that the full buffer is read at once
 		return nil, errors.New("Less than 4k read, skipping block")
 	}
-	csum := md5.Sum(buffer)
+	csum := makeChecksum(buffer)
 	return &csum, nil
 }
 
