@@ -35,7 +35,6 @@ type FileInformation struct {
 }
 
 func serialize(fileInfo FileInformation, withCsum bool) string {
-	//log.Printf("fileInfo: %v", fileInfo)
 	offset := strconv.FormatInt(int64(fileInfo.physicalOffset), 16)
 	path := base64.StdEncoding.EncodeToString([]byte(fileInfo.Path))
 	size := strconv.FormatInt(fileInfo.Size, 16)
@@ -47,7 +46,6 @@ func serialize(fileInfo FileInformation, withCsum bool) string {
 }
 
 func deserialize(line string) (*FileInformation, error) {
-	//fields := strings.Fields(line)
 	fields := strings.Split(line, " ")
 	if len(fields) < 3 {
 		return nil, errors.Errorf("Too few fields in line: %s", line)
@@ -103,11 +101,12 @@ func readFileMeta(path string) (*FileInformation, error) {
 		return nil, errors.Wrap(err, "open file failed")
 	}
 	defer f.Close()
-	physicalOffset, err := btrfs.PhysicalOffset(f)
+
+	fragments, err := btrfs.Fragments(f)
 	if err != nil {
-		return nil, errors.Wrap(err, "Faild to read physical offset of file")
+		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
-	// We also need to ensure the first block is at least 4k, even though this will probably always be the case
+	physicalOffset := fragments[0].Start
 	return &FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
@@ -202,22 +201,14 @@ func collectFileInformation(path string, outfile *bufio.Writer) {
 			fileInformation.Size = size
 			outfile.WriteString(serialize(*fileInformation, false))
 			outfile.WriteByte('\n')
-			//dumpAsJson(strconv.FormatInt(int64(fileInformation.physicalOffset), 10), fileInformation, outfile)
 		}
 	}
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []FileInformation, noact bool) {
-	//log.Println("Dedup:")
-	//for _, file := range files {
-	//	log.Printf("  %+v: %v\n", file, file.csum)
-	//}
-	if len(files) < 2 {
+	if len(files) < 2 || files[0].csum == nil {
 		return
-	}
-	if files[0].csum == nil {
-		return // for now we have to deel with nil here...
 	}
 
 	// currently we assume that the files are equal up to the size of the smallest file
