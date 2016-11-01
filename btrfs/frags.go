@@ -41,7 +41,7 @@ type fiemap struct {
 	fm_mapped_extents uint32                           /* number of extents that were mapped (out) */
 	fm_extent_count   uint32                           /* size of fm_extents array (in) */
 	fm_reserved       uint32
-	fm_extends        [extendBufferCount]fiemap_extent // go doesn't support flexible array, so the easiest way is to fix the size with a constant
+	fm_extents        [extendBufferCount]fiemap_extent // go doesn't support flexible array, so the easiest way is to fix the size with a constant
 }
 
 type Fragment struct {
@@ -68,7 +68,7 @@ func Fragments(file *os.File) ([]Fragment, error) {
 		if data.fm_mapped_extents == 0 {
 			return nil, errors.New("No (more) extends found")
 		}
-		for _, extend := range data.fm_extends[0:data.fm_mapped_extents] {
+		for _, extend := range data.fm_extents[0:data.fm_mapped_extents] {
 			fmt.Printf("  %d, %+v\n", start, extend)
 			last = last || extend.fe_flags & FIEMAP_EXTENT_LAST != 0
 			if extend.fe_logical != start {
