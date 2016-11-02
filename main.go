@@ -13,7 +13,6 @@ import (
 	"runtime/pprof"
 	"syscall"
 	"fmt"
-	"github.com/bertbaron/btrdedup/filebased"
 )
 
 const (
@@ -69,18 +68,19 @@ func readChecksum(path string) (*[16]byte, error) {
 	return &csum, nil
 }
 
+// Updates the file information with checksum. Returns true if successful, false otherwise
 // PRE: all files start at the same offset and files is not empty
-func dumpChecksums(files []*storage.FileInformation, state storage.DedupInterface) {
+func createChecksums(files []*storage.FileInformation, state storage.DedupInterface) bool {
 	path := files[0].Path
 	csum, err := readChecksum(path)
 	if err != nil {
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
-		return
+		return false
 	}
 	for _, file := range files {
 		file.Csum = csum
 	}
-	state.ChecksumUpdated(files)
+	return true
 }
 
 // todo: use filepath.Walk
@@ -190,8 +190,8 @@ func pass1(filenames []string, state storage.DedupInterface) {
 func pass2(state storage.DedupInterface) {
 	log.Printf("Pass 2, calculating hashes for first block of files")
 	state.StartPass2()
-	state.PartitionOnOffset(func(files []*storage.FileInformation) {
-		dumpChecksums(files, state)
+	state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
+		return createChecksums(files, state)
 	})
 	state.EndPass2()
 }
@@ -227,7 +227,7 @@ func main() {
 
 	updateOpenFileLimit()
 
-	state := filebased.NewInterface()
+	state := storage.NewFileBased()
 
 	pass1(filenames, state)
 

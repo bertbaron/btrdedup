@@ -1,7 +1,6 @@
-package filebased
+package storage
 
 import (
-	"github.com/bertbaron/btrdedup/storage"
 	"os"
 	"io/ioutil"
 	"log"
@@ -20,11 +19,12 @@ type FileBased struct {
 	infilename string
 }
 
-func NewInterface() *FileBased {
+// Creates a file based storage instance
+func NewFileBased() *FileBased {
 	return new(FileBased)
 }
 
-// ** PASS 1
+// ** PASS 1 **
 func (state *FileBased) StartPass1() {
 	var err error
 	state.outfile, err = ioutil.TempFile("", "btrdedup")
@@ -36,7 +36,7 @@ func (state *FileBased) StartPass1() {
 	state.writer = bufio.NewWriter(state.outfile)
 }
 
-func (state *FileBased) AddFile(file storage.FileInformation) {
+func (state *FileBased) AddFile(file FileInformation) {
 	prefix := strconv.FormatInt(int64(file.PhysicalOffset), 36)
 	writeFileInfo(prefix, file, state.writer)
 
@@ -49,7 +49,7 @@ func (state *FileBased) EndPass1() {
 	sort(state.infilename)
 }
 
-// ** PASS 2
+// ** PASS 2 **
 
 // TODO seems like we can share some code with StartPass1
 func (state *FileBased) StartPass2() {
@@ -63,15 +63,16 @@ func (state *FileBased) StartPass2() {
 	state.writer = bufio.NewWriter(state.outfile)
 }
 
-func (state *FileBased) PartitionOnOffset(receiver func(files []*storage.FileInformation)) {
-	partitionFile(state.infilename, receiver)
-}
+func (state *FileBased) PartitionOnOffset(receiver func(files []*FileInformation) bool) {
+	partitionFile(state.infilename, func(files []*FileInformation) {
+		if receiver(files) {
+			for _, file := range files {
+				prefix := base64.StdEncoding.EncodeToString(file.Csum[:])
+				writeFileInfo(prefix, *file, state.writer)
+			}
+		}
+	})
 
-func (state *FileBased) ChecksumUpdated(files []*storage.FileInformation) {
-	for _, file := range files {
-		prefix := base64.StdEncoding.EncodeToString(file.Csum[:])
-		writeFileInfo(prefix, *file, state.writer)
-	}
 }
 
 // TODO seems like we can share some code with EndPass1
@@ -82,13 +83,13 @@ func (state *FileBased) EndPass2() {
 	sort(state.infilename)
 }
 
-// ** PASS 3
+// ** PASS 3 **
 
 func (state *FileBased) StartPass3() {
 	//
 }
 
-func (state *FileBased) PartitionOnHash(receiver func(files []*storage.FileInformation)) {
+func (state *FileBased) PartitionOnHash(receiver func(files []*FileInformation)) {
 	partitionFile(state.infilename, receiver)
 }
 
@@ -108,7 +109,7 @@ func sort(file string) {
 	log.Printf("Sorted %s", file)
 }
 
-func serialize(fileInfo storage.FileInformation) string {
+func serialize(fileInfo FileInformation) string {
 	buffer := new(bytes.Buffer)
 	enc := gob.NewEncoder(buffer)
 	err := enc.Encode(fileInfo)
@@ -118,14 +119,14 @@ func serialize(fileInfo storage.FileInformation) string {
 	return base64.StdEncoding.EncodeToString(buffer.Bytes())
 }
 
-func deserialize(line string) (*storage.FileInformation, error) {
+func deserialize(line string) (*FileInformation, error) {
 	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {
 		return nil, err
 	}
 	buffer := bytes.NewReader(data)
 	dec := gob.NewDecoder(buffer)
-	fileInfo := new(storage.FileInformation)
+	fileInfo := new(FileInformation)
 	err = dec.Decode(fileInfo)
 	if err != nil {
 		return nil, err
@@ -133,14 +134,14 @@ func deserialize(line string) (*storage.FileInformation, error) {
 	return fileInfo, nil
 }
 
-func writeFileInfo(prefix string, fileInfo storage.FileInformation, outfile *bufio.Writer) {
+func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Writer) {
 	outfile.WriteString(prefix)
 	outfile.WriteByte(' ')
 	outfile.WriteString(serialize(fileInfo))
 	outfile.WriteByte('\n')
 }
 
-func partitionFile(fileName string, receiver func([]*storage.FileInformation)) {
+func partitionFile(fileName string, receiver func([]*FileInformation)) {
 	infile, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal("Failed to open %s", fileName)
@@ -148,7 +149,7 @@ func partitionFile(fileName string, receiver func([]*storage.FileInformation)) {
 	defer infile.Close()
 	scanner := bufio.NewScanner(infile)
 	lastPrefix := ""
-	files := make([]*storage.FileInformation, 0)
+	files := make([]*FileInformation, 0)
 	for scanner.Scan() {
 		line := scanner.Text()
 		idx := strings.Index(line, " ")

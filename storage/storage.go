@@ -13,11 +13,12 @@ type DedupInterface interface {
 	AddFile(file FileInformation)
 	EndPass1()
 
+	// phase 2, updates the file information with checksums of the first block
 	StartPass2()
-	PartitionOnOffset(receiver func(files []*FileInformation))
-	ChecksumUpdated(files []*FileInformation)
+	PartitionOnOffset(receiver func(files []*FileInformation) bool)
 	EndPass2()
 
+	// phase 3, deduplicates files if possible
 	StartPass3()
 	PartitionOnHash(receiver func(files []*FileInformation))
 	EndPass3()
