@@ -5,9 +5,9 @@ import (
 	"encoding/base64"
 	"flag"
 	"github.com/bertbaron/btrdedup/btrfs"
+	"github.com/bertbaron/btrdedup/api"
 	"github.com/pkg/errors"
 	"crypto/md5"
-	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -18,22 +18,15 @@ import (
 	"fmt"
 	"bytes"
 	"encoding/gob"
-	"strconv"
 	"strings"
+	"github.com/bertbaron/btrdedup/filebased"
 )
 
 const (
 	minSize int64 = 4 * 1024
 )
 
-type FileInformation struct {
-	Path           string
-	PhysicalOffset uint64
-	Size           int64
-	Csum           *[16]byte
-}
-
-func serialize(fileInfo FileInformation) string {
+func serialize(fileInfo api.FileInformation) string {
 	buffer := new(bytes.Buffer)
 	enc := gob.NewEncoder(buffer)
 	err := enc.Encode(fileInfo)
@@ -43,14 +36,14 @@ func serialize(fileInfo FileInformation) string {
 	return base64.StdEncoding.EncodeToString(buffer.Bytes())
 }
 
-func deserialize(line string) (*FileInformation, error) {
+func deserialize(line string) (*api.FileInformation, error) {
 	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {
 		return nil, err
 	}
 	buffer := bytes.NewReader(data)
 	dec := gob.NewDecoder(buffer)
-	fileInfo := new(FileInformation)
+	fileInfo := new(api.FileInformation)
 	err = dec.Decode(fileInfo)
 	if err != nil {
 		return nil, err
@@ -69,7 +62,7 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, errors.Wrap(err, "reading dir names failed")
 }
 
-func readFileMeta(path string) (*FileInformation, error) {
+func readFileMeta(path string) (*api.FileInformation, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "open file failed")
@@ -81,7 +74,7 @@ func readFileMeta(path string) (*FileInformation, error) {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
 	physicalOffset := fragments[0].Start
-	return &FileInformation{path, physicalOffset, 0, nil}, nil
+	return &api.FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -107,7 +100,7 @@ func readChecksum(path string) (*[16]byte, error) {
 	return &csum, nil
 }
 
-func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Writer) {
+func writeFileInfo(prefix string, fileInfo api.FileInformation, outfile *bufio.Writer) {
 	outfile.WriteString(prefix)
 	outfile.WriteByte(' ')
 	outfile.WriteString(serialize(fileInfo))
@@ -115,7 +108,7 @@ func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Write
 }
 
 // PRE: all files start at the same offset and files is not empty
-func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
+func dumpChecksums(files []api.FileInformation, state api.DedupInterface) {
 	path := files[0].Path
 	csum, err := readChecksum(path)
 	if err != nil {
@@ -124,13 +117,12 @@ func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
 	}
 	for _, file := range files {
 		file.Csum = csum
-		prefix := base64.StdEncoding.EncodeToString(csum[:])
-		writeFileInfo(prefix, file, outfile)
+		state.ChecksumUpdated(files)
 	}
 }
 
 // todo: use filepath.Walk
-func collectFileInformation(path string, outfile *bufio.Writer) {
+func collectFileInformation(path string, state api.DedupInterface) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -149,7 +141,7 @@ func collectFileInformation(path string, outfile *bufio.Writer) {
 			return
 		}
 		for _, e := range elements {
-			collectFileInformation(filepath.Join(path, e), outfile)
+			collectFileInformation(filepath.Join(path, e), state)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
@@ -160,14 +152,15 @@ func collectFileInformation(path string, outfile *bufio.Writer) {
 				return
 			}
 			fileInformation.Size = size
-			prefix := strconv.FormatInt(int64(fileInformation.PhysicalOffset), 36)
-			writeFileInfo(prefix, *fileInformation, outfile)
+			state.AddFile(*fileInformation)
+			//prefix := strconv.FormatInt(int64(fileInformation.PhysicalOffset), 36)
+			//writeFileInfo(prefix, *fileInformation, outfile)
 		}
 	}
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
-func submitForDedup(files []FileInformation, noact bool) {
+func submitForDedup(files []api.FileInformation, noact bool) {
 	if len(files) < 2 || files[0].Csum == nil {
 		return
 	}
@@ -233,24 +226,15 @@ func sort(file string) {
 	log.Printf("Sorted %s", file)
 }
 
-func pass1(filenames []string) string {
-	outfile, err := ioutil.TempFile("", "btrdedup")
-	if err != nil {
-		log.Fatalf("Unable to create temprary file")
-	}
-	log.Printf("Pass 1, writing to %s", outfile.Name())
-	writer := bufio.NewWriter(outfile)
+func pass1(filenames []string, state api.DedupInterface) {
+	state.StartPass1()
 	for _, filename := range filenames {
-		collectFileInformation(filename, writer)
+		collectFileInformation(filename, state)
 	}
-	writer.Flush()
-	outfile.Close()
-
-	sort(outfile.Name())
-	return outfile.Name()
+	state.EndPass1()
 }
 
-func partitionFile(fileName string, receiver func([]FileInformation)) {
+func partitionFile(fileName string, receiver func([]api.FileInformation)) {
 	infile, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal("Failed to open %s", fileName)
@@ -258,7 +242,7 @@ func partitionFile(fileName string, receiver func([]FileInformation)) {
 	defer infile.Close()
 	scanner := bufio.NewScanner(infile)
 	lastPrefix := ""
-	files := make([]FileInformation, 0)
+	files := make([]api.FileInformation, 0)
 	for scanner.Scan() {
 		line := scanner.Text()
 		idx := strings.Index(line, " ")
@@ -281,29 +265,18 @@ func partitionFile(fileName string, receiver func([]FileInformation)) {
 	}
 }
 
-func pass2(infileName string) string {
-	outfile, err := ioutil.TempFile("", "btrdedup")
-	if err != nil {
-		log.Fatalf("Unable to create temprary file")
-	}
-	log.Printf("Pass 2, writing to %s", outfile.Name())
-	writer := bufio.NewWriter(outfile)
-
-	partitionFile(infileName, func(files []FileInformation) {
-		dumpChecksums(files, writer)
+func pass2(state api.DedupInterface) {
+	state.StartPass1()
+	state.PartitionOnOffset(func(files []api.FileInformation) {
+		dumpChecksums(files, state)
 	})
-
-	writer.Flush()
-	outfile.Close()
-
-	sort(outfile.Name())
-	return outfile.Name()
+	state.EndPass1()
 }
 
 func pass3(infileName string, noact bool) {
 	log.Printf("Pass 3, deduplucating files")
 
-	partitionFile(infileName, func(files []FileInformation) {
+	partitionFile(infileName, func(files []api.FileInformation) {
 		submitForDedup(files, noact)
 	})
 }
@@ -330,9 +303,11 @@ func main() {
 
 	updateOpenFileLimit()
 
-	tmpfile1 := pass1(filenames)
+	state := filebased.NewInterface()
 
-	tmpfile2 := pass2(tmpfile1)
+	pass1(filenames, state)
+
+	pass2(state)
 
 	pass3(tmpfile2, *noact)
 
