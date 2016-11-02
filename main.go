@@ -2,7 +2,7 @@ package main
 
 import (
 	"flag"
-	"github.com/bertbaron/btrdedup/btrfs"
+	"github.com/bertbaron/btrdedup/sys"
 	"github.com/bertbaron/btrdedup/storage"
 	"github.com/pkg/errors"
 	"crypto/md5"
@@ -37,7 +37,7 @@ func readFileMeta(path string) (*storage.FileInformation, error) {
 	}
 	defer f.Close()
 
-	fragments, err := btrfs.Fragments(f)
+	fragments, err := sys.Fragments(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
@@ -61,7 +61,7 @@ func readChecksum(path string) (*[16]byte, error) {
 		return nil, errors.Wrap(err, "reading from file")
 	}
 	if n1 < 4096 {
-		// TODO we should probably need to repeat reading, but for now we assume that the full buffer is read at once
+		// We assume that the full block is read at once. If proven false we need to read in a loop
 		return nil, errors.New("Less than 4k read, skipping block")
 	}
 	csum := makeChecksum(buffer)
@@ -115,8 +115,6 @@ func collectFileInformation(path string, state storage.DedupInterface) {
 			}
 			fileInformation.Size = size
 			state.AddFile(*fileInformation)
-			//prefix := strconv.FormatInt(int64(fileInformation.PhysicalOffset), 36)
-			//writeFileInfo(prefix, *fileInformation, outfile)
 		}
 	}
 }
@@ -210,7 +208,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]... [FILE-OR-DIR]...\n", os.Args[0])
 		flag.PrintDefaults()
 	}
-	noact := flag.Bool("noact", false, "if provided or true, the tool will only scan and log results, but not actually deduplicate")
+	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
+	memmode := flag.Bool("memmode", false, "if provided, the tool will run in memory mode. By default it uses temporary files which is somewhat slower but more scalable")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	flag.Parse()
 
@@ -227,7 +226,11 @@ func main() {
 
 	updateOpenFileLimit()
 
-	state := storage.NewFileBased()
+	var state storage.DedupInterface = storage.NewFileBased()
+	if *memmode {
+		log.Printf("Running in memory mode")
+		state = storage.NewMemoryBased()
+	}
 
 	pass1(filenames, state)
 

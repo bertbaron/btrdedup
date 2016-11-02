@@ -1,9 +1,8 @@
-package btrfs
+package sys
 
 import (
 	"os"
 	"unsafe"
-	"github.com/bertbaron/btrdedup/ioctl"
 	"github.com/pkg/errors"
 )
 
@@ -12,16 +11,6 @@ const (
 	extendBufferCount = 20
 
 	FIEMAP_EXTENT_LAST = 0x00000001 /* Last extent in file. */
-	FIEMAP_EXTENT_UNKNOWN = 0x00000002 /* Data location unknown. */
-	FIEMAP_EXTENT_DELALLOC = 0x00000004 /* Location still pending. Sets EXTENT_UNKNOWN. */
-	FIEMAP_EXTENT_ENCODED = 0x00000008 /* Data can not be read while fs is unmounted */
-	FIEMAP_EXTENT_DATA_ENCRYPTED = 0x00000080 /* Data is encrypted by fs. Sets EXTENT_NO_BYPASS. */
-	FIEMAP_EXTENT_NOT_ALIGNED = 0x00000100 /* Extent offsets may not be block aligned. */
-	FIEMAP_EXTENT_DATA_INLINE = 0x00000200 /* Data mixed with metadata. Sets EXTENT_NOT_ALIGNED.*/
-	FIEMAP_EXTENT_DATA_TAIL = 0x00000400 /* Multiple files in block. Sets EXTENT_NOT_ALIGNED.*/
-	FIEMAP_EXTENT_UNWRITTEN = 0x00000800 /* Space allocated, but no data (i.e. zero). */
-	FIEMAP_EXTENT_MERGED = 0x00001000 /* File does not natively support extents. Result merged for efficiency. */
-	FIEMAP_EXTENT_SHARED = 0x00002000 /* Space shared with other files. */
 )
 
 type fiemap_extent struct {
@@ -61,7 +50,7 @@ func Fragments(file *os.File) ([]Fragment, error) {
 		data.fm_length = 1024 * 1024 * 1024
 		data.fm_extent_count = extendBufferCount
 
-		if err := ioctl.IOCTL(file.Fd(), fiemapOp, uintptr(unsafe.Pointer(&data))); err != nil {
+		if err := IOCTL(file.Fd(), fiemapOp, uintptr(unsafe.Pointer(&data))); err != nil {
 			return nil, err
 		}
 		if data.fm_mapped_extents == 0 {

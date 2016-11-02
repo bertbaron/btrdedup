@@ -1,4 +1,4 @@
-package btrfs
+package sys
 
 /*
 #include <string.h>
@@ -10,7 +10,6 @@ import (
 	"log"
 	"unsafe"
 	"fmt"
-	"github.com/bertbaron/btrdedup/ioctl"
 )
 
 const (
@@ -101,7 +100,7 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) ([]BtrfsSameResu
 
 	args := makeSameRequest(same, length)
 
-	if err := ioctl.IOCTL(same[0].File.Fd(), sameExtendOp, uintptr(unsafe.Pointer(args))); err != nil {
+	if err := IOCTL(same[0].File.Fd(), sameExtendOp, uintptr(unsafe.Pointer(args))); err != nil {
 		return nil, err
 	}
 

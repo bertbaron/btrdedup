@@ -26,14 +26,7 @@ func NewFileBased() *FileBased {
 
 // ** PASS 1 **
 func (state *FileBased) StartPass1() {
-	var err error
-	state.outfile, err = ioutil.TempFile("", "btrdedup")
-	if err != nil {
-		log.Fatalf("Unable to create temprary file")
-	}
-
-	log.Printf("Writing to %s", state.outfile.Name())
-	state.writer = bufio.NewWriter(state.outfile)
+	initWriter(state)
 }
 
 func (state *FileBased) AddFile(file FileInformation) {
@@ -43,24 +36,13 @@ func (state *FileBased) AddFile(file FileInformation) {
 }
 
 func (state *FileBased) EndPass1() {
-	state.writer.Flush()
-	state.outfile.Close()
-	state.infilename = state.outfile.Name()
-	sort(state.infilename)
+	closeWriterAndSaveFilename(state)
 }
 
 // ** PASS 2 **
 
-// TODO seems like we can share some code with StartPass1
 func (state *FileBased) StartPass2() {
-	var err error
-	state.outfile, err = ioutil.TempFile("", "btrdedup")
-	if err != nil {
-		log.Fatalf("Unable to create temprary file")
-	}
-
-	log.Printf("Writing to %s", state.outfile.Name())
-	state.writer = bufio.NewWriter(state.outfile)
+	initWriter(state)
 }
 
 func (state *FileBased) PartitionOnOffset(receiver func(files []*FileInformation) bool) {
@@ -75,38 +57,38 @@ func (state *FileBased) PartitionOnOffset(receiver func(files []*FileInformation
 
 }
 
-// TODO seems like we can share some code with EndPass1
 func (state *FileBased) EndPass2() {
-	state.writer.Flush()
-	state.outfile.Close()
-	state.infilename = state.outfile.Name()
-	sort(state.infilename)
+	closeWriterAndSaveFilename(state)
 }
 
 // ** PASS 3 **
 
-func (state *FileBased) StartPass3() {
-	//
-}
+func (state *FileBased) StartPass3() {}
 
 func (state *FileBased) PartitionOnHash(receiver func(files []*FileInformation)) {
 	partitionFile(state.infilename, receiver)
 }
 
-func (state *FileBased) EndPass3() {
-	//
+func (state *FileBased) EndPass3() {}
+
+
+// ** private functions **
+
+func initWriter(state *FileBased) {
+	var err error
+	state.outfile, err = ioutil.TempFile("", "btrdedup")
+	if err != nil {
+		log.Fatalf("Unable to create temprary file")
+	}
+
+	log.Printf("Writing to %s", state.outfile.Name())
+	state.writer = bufio.NewWriter(state.outfile)
 }
 
-
-// ** private functions
-func sort(file string) {
-	log.Printf("Sorting %s", file)
-	command := exec.Command("sort", file, "-o", file)
-	err := command.Run()
-	if err != nil {
-		log.Fatal("Failed to sort %s", file)
-	}
-	log.Printf("Sorted %s", file)
+func closeWriterAndSaveFilename(state *FileBased) {
+	state.writer.Flush()
+	state.outfile.Close()
+	state.infilename = state.outfile.Name()
 }
 
 func serialize(fileInfo FileInformation) string {
@@ -142,6 +124,7 @@ func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Write
 }
 
 func partitionFile(fileName string, receiver func([]*FileInformation)) {
+	sortFile(fileName)
 	infile, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal("Failed to open %s", fileName)
@@ -170,4 +153,14 @@ func partitionFile(fileName string, receiver func([]*FileInformation)) {
 	if len(files) != 0 {
 		receiver(files)
 	}
+}
+
+func sortFile(file string) {
+	log.Printf("Sorting %s", file)
+	command := exec.Command("sort", file, "-o", file)
+	err := command.Run()
+	if err != nil {
+		log.Fatal("Failed to sort %s", file)
+	}
+	log.Printf("Sorted %s", file)
 }
