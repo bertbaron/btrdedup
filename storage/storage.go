@@ -1,4 +1,4 @@
-package api
+package storage
 
 type FileInformation struct {
 	Path           string
@@ -14,11 +14,11 @@ type DedupInterface interface {
 	EndPass1()
 
 	StartPass2()
-	PartitionOnOffset(receiver func(files []FileInformation))
-	ChecksumUpdated(files []FileInformation)
+	PartitionOnOffset(receiver func(files []*FileInformation))
+	ChecksumUpdated(files []*FileInformation)
 	EndPass2()
 
 	StartPass3()
-	PartitionOnHash(receiver func(files []FileInformation))
+	PartitionOnHash(receiver func(files []*FileInformation))
 	EndPass3()
 }

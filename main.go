@@ -1,55 +1,24 @@
 package main
 
 import (
-	"bufio"
-	"encoding/base64"
 	"flag"
 	"github.com/bertbaron/btrdedup/btrfs"
-	"github.com/bertbaron/btrdedup/api"
+	"github.com/bertbaron/btrdedup/storage"
 	"github.com/pkg/errors"
 	"crypto/md5"
 	"log"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime/pprof"
 	"syscall"
 	"fmt"
-	"bytes"
-	"encoding/gob"
-	"strings"
 	"github.com/bertbaron/btrdedup/filebased"
 )
 
 const (
 	minSize int64 = 4 * 1024
 )
-
-func serialize(fileInfo api.FileInformation) string {
-	buffer := new(bytes.Buffer)
-	enc := gob.NewEncoder(buffer)
-	err := enc.Encode(fileInfo)
-	if err != nil {
-		log.Fatalf("Could not encode file information: %v", err)
-	}
-	return base64.StdEncoding.EncodeToString(buffer.Bytes())
-}
-
-func deserialize(line string) (*api.FileInformation, error) {
-	data, err := base64.StdEncoding.DecodeString(line)
-	if err != nil {
-		return nil, err
-	}
-	buffer := bytes.NewReader(data)
-	dec := gob.NewDecoder(buffer)
-	fileInfo := new(api.FileInformation)
-	err = dec.Decode(fileInfo)
-	if err != nil {
-		return nil, err
-	}
-	return fileInfo, nil
-}
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -62,7 +31,7 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, errors.Wrap(err, "reading dir names failed")
 }
 
-func readFileMeta(path string) (*api.FileInformation, error) {
+func readFileMeta(path string) (*storage.FileInformation, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "open file failed")
@@ -74,7 +43,7 @@ func readFileMeta(path string) (*api.FileInformation, error) {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
 	physicalOffset := fragments[0].Start
-	return &api.FileInformation{path, physicalOffset, 0, nil}, nil
+	return &storage.FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -100,15 +69,8 @@ func readChecksum(path string) (*[16]byte, error) {
 	return &csum, nil
 }
 
-func writeFileInfo(prefix string, fileInfo api.FileInformation, outfile *bufio.Writer) {
-	outfile.WriteString(prefix)
-	outfile.WriteByte(' ')
-	outfile.WriteString(serialize(fileInfo))
-	outfile.WriteByte('\n')
-}
-
 // PRE: all files start at the same offset and files is not empty
-func dumpChecksums(files []api.FileInformation, state api.DedupInterface) {
+func dumpChecksums(files []*storage.FileInformation, state storage.DedupInterface) {
 	path := files[0].Path
 	csum, err := readChecksum(path)
 	if err != nil {
@@ -117,12 +79,12 @@ func dumpChecksums(files []api.FileInformation, state api.DedupInterface) {
 	}
 	for _, file := range files {
 		file.Csum = csum
-		state.ChecksumUpdated(files)
 	}
+	state.ChecksumUpdated(files)
 }
 
 // todo: use filepath.Walk
-func collectFileInformation(path string, state api.DedupInterface) {
+func collectFileInformation(path string, state storage.DedupInterface) {
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -160,7 +122,7 @@ func collectFileInformation(path string, state api.DedupInterface) {
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
-func submitForDedup(files []api.FileInformation, noact bool) {
+func submitForDedup(files []*storage.FileInformation, noact bool) {
 	if len(files) < 2 || files[0].Csum == nil {
 		return
 	}
@@ -216,17 +178,8 @@ func updateOpenFileLimit() {
 	}
 }
 
-func sort(file string) {
-	log.Printf("Sorting %s", file)
-	command := exec.Command("sort", file, "-o", file)
-	err := command.Run()
-	if err != nil {
-		log.Fatal("Failed to sort %s", file)
-	}
-	log.Printf("Sorted %s", file)
-}
-
-func pass1(filenames []string, state api.DedupInterface) {
+func pass1(filenames []string, state storage.DedupInterface) {
+	log.Printf("Pass 1, collecting fragmentation information")
 	state.StartPass1()
 	for _, filename := range filenames {
 		collectFileInformation(filename, state)
@@ -234,51 +187,22 @@ func pass1(filenames []string, state api.DedupInterface) {
 	state.EndPass1()
 }
 
-func partitionFile(fileName string, receiver func([]api.FileInformation)) {
-	infile, err := os.Open(fileName)
-	if err != nil {
-		log.Fatal("Failed to open %s", fileName)
-	}
-	defer infile.Close()
-	scanner := bufio.NewScanner(infile)
-	lastPrefix := ""
-	files := make([]api.FileInformation, 0)
-	for scanner.Scan() {
-		line := scanner.Text()
-		idx := strings.Index(line, " ")
-		prefix := line[:idx]
-		fileInfo, err := deserialize(line[idx + 1:])
-		if err != nil {
-			log.Fatalf("Failed to parse %s, %v", line, err)
-		}
-		if prefix != lastPrefix {
-			if len(files) != 0 {
-				receiver(files)
-			}
-			files = files[0:0]
-			lastPrefix = prefix
-		}
-		files = append(files, *fileInfo)
-	}
-	if len(files) != 0 {
-		receiver(files)
-	}
-}
-
-func pass2(state api.DedupInterface) {
-	state.StartPass1()
-	state.PartitionOnOffset(func(files []api.FileInformation) {
+func pass2(state storage.DedupInterface) {
+	log.Printf("Pass 2, calculating hashes for first block of files")
+	state.StartPass2()
+	state.PartitionOnOffset(func(files []*storage.FileInformation) {
 		dumpChecksums(files, state)
 	})
-	state.EndPass1()
+	state.EndPass2()
 }
 
-func pass3(infileName string, noact bool) {
+func pass3(state storage.DedupInterface, noact bool) {
 	log.Printf("Pass 3, deduplucating files")
-
-	partitionFile(infileName, func(files []api.FileInformation) {
+	state.StartPass3()
+	state.PartitionOnHash(func(files []*storage.FileInformation) {
 		submitForDedup(files, noact)
 	})
+	state.EndPass3()
 }
 
 func main() {
@@ -309,7 +233,7 @@ func main() {
 
 	pass2(state)
 
-	pass3(tmpfile2, *noact)
+	pass3(state, *noact)
 
 	log.Println("Done")
 }
