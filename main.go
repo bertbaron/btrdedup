@@ -2,14 +2,11 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"encoding/base64"
 	"flag"
 	"github.com/bertbaron/btrdedup/btrfs"
 	"github.com/pkg/errors"
-	"github.com/spaolacci/murmur3"
-	//"crypto/md5"
-	//"hash/fnv"
+	"crypto/md5"
 	"io/ioutil"
 	"log"
 	"math"
@@ -17,10 +14,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/pprof"
-	"strconv"
-	"strings"
 	"syscall"
 	"fmt"
+	"bytes"
+	"encoding/gob"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -29,59 +28,34 @@ const (
 
 type FileInformation struct {
 	Path           string
-	physicalOffset uint64
+	PhysicalOffset uint64
 	Size           int64
-	csum           *[16]byte
+	Csum           *[16]byte
 }
 
-func serialize(fileInfo FileInformation, withCsum bool) string {
-	offset := strconv.FormatInt(int64(fileInfo.physicalOffset), 16)
-	path := base64.StdEncoding.EncodeToString([]byte(fileInfo.Path))
-	size := strconv.FormatInt(fileInfo.Size, 16)
-	encoded := offset + " " + path + " " + size
-	if withCsum {
-		encoded = hex.EncodeToString(fileInfo.csum[:]) + " " + encoded
+func serialize(fileInfo FileInformation) string {
+	buffer := new(bytes.Buffer)
+	enc := gob.NewEncoder(buffer)
+	err := enc.Encode(fileInfo)
+	if err != nil {
+		log.Fatalf("Could not encode file information: %v", err)
 	}
-	return encoded
+	return base64.StdEncoding.EncodeToString(buffer.Bytes())
 }
 
 func deserialize(line string) (*FileInformation, error) {
-	fields := strings.Split(line, " ")
-	if len(fields) < 3 {
-		return nil, errors.Errorf("Too few fields in line: %s", line)
-	}
-	var fileInfo FileInformation
-	if len(fields) >= 4 {
-		csumbytes, err := hex.DecodeString(fields[0])
-		if err != nil {
-			return nil, errors.Wrapf(err, "Error parsing checksum from %s", fields[0])
-		}
-		var csum [16]byte
-		copy(csum[:], csumbytes)
-		fileInfo.csum = &csum
-		fields = fields[1:]
-	}
-
-	offset, err := strconv.ParseInt(fields[0], 16, 64)
+	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error parsing offset from %s", fields[0])
+		return nil, err
 	}
-	fileInfo.physicalOffset = uint64(offset)
-	fields = fields[1:]
-
-	bytes, err := base64.StdEncoding.DecodeString(fields[0])
+	buffer := bytes.NewReader(data)
+	dec := gob.NewDecoder(buffer)
+	fileInfo := new(FileInformation)
+	err = dec.Decode(fileInfo)
 	if err != nil {
-		return nil, errors.Wrapf(err, "Error parsing path from %s", fields[0])
+		return nil, err
 	}
-	fileInfo.Path = string(bytes)
-	fields = fields[1:]
-
-	filesize, err := strconv.ParseInt(fields[0], 16, 64)
-	if (err != nil) {
-		return nil, errors.Wrapf(err, "Error parsing file size from %s", fields[0])
-	}
-	fileInfo.Size = filesize
-	return &fileInfo, nil
+	return fileInfo, nil
 }
 
 // readDirNames reads the directory named by dirname
@@ -110,24 +84,8 @@ func readFileMeta(path string) (*FileInformation, error) {
 	return &FileInformation{path, physicalOffset, 0, nil}, nil
 }
 
-// Most simple translation of uint64 into a byte slice. Yes I know its reversed, but that doesn't matter for us
-func putInt(data []byte, value uint64) {
-	for i := 0; i < 8; i++ {
-		data[i] = byte(value & 0xFF)
-		value >>= 8
-	}
-}
-
 func makeChecksum(data []byte) [16]byte {
-	//hasher := fnv.New64()
-	//hasher.Write(data)
-	//csum1 := hasher.Sum64()
-	//return md5.Sum(data)
-	csum1, csum2 := murmur3.Sum128(data)
-	var bytes [16]byte
-	putInt(bytes[0:8], csum1)
-	putInt(bytes[8:16], csum2)
-	return bytes
+	return md5.Sum(data)
 }
 
 func readChecksum(path string) (*[16]byte, error) {
@@ -149,12 +107,15 @@ func readChecksum(path string) (*[16]byte, error) {
 	return &csum, nil
 }
 
-// PRE: all files start at the same offset
-func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
-	if len(files) == 0 {
-		return
-	}
+func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Writer) {
+	outfile.WriteString(prefix)
+	outfile.WriteByte(' ')
+	outfile.WriteString(serialize(fileInfo))
+	outfile.WriteByte('\n')
+}
 
+// PRE: all files start at the same offset and files is not empty
+func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
 	path := files[0].Path
 	csum, err := readChecksum(path)
 	if err != nil {
@@ -162,9 +123,9 @@ func dumpChecksums(files []FileInformation, outfile *bufio.Writer) {
 		return
 	}
 	for _, file := range files {
-		file.csum = csum
-		outfile.WriteString(serialize(file, true))
-		outfile.WriteByte('\n')
+		file.Csum = csum
+		prefix := base64.StdEncoding.EncodeToString(csum[:])
+		writeFileInfo(prefix, file, outfile)
 	}
 }
 
@@ -199,15 +160,15 @@ func collectFileInformation(path string, outfile *bufio.Writer) {
 				return
 			}
 			fileInformation.Size = size
-			outfile.WriteString(serialize(*fileInformation, false))
-			outfile.WriteByte('\n')
+			prefix := strconv.FormatInt(int64(fileInformation.PhysicalOffset), 36)
+			writeFileInfo(prefix, *fileInformation, outfile)
 		}
 	}
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []FileInformation, noact bool) {
-	if len(files) < 2 || files[0].csum == nil {
+	if len(files) < 2 || files[0].Csum == nil {
 		return
 	}
 
@@ -221,22 +182,22 @@ func submitForDedup(files []FileInformation, noact bool) {
 
 	filenames := make([]string, len(files))
 	sameOffset := true
-	physicalOffset := files[0].physicalOffset
+	physicalOffset := files[0].PhysicalOffset
 	for i, file := range files {
-		if file.physicalOffset != physicalOffset {
+		if file.PhysicalOffset != physicalOffset {
 			sameOffset = false
 		}
 		filenames[i] = file.Path
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 	}
 }
 
@@ -289,12 +250,38 @@ func pass1(filenames []string) string {
 	return outfile.Name()
 }
 
-func pass2(infileName string) string {
-	infile, err := os.Open(infileName)
+func partitionFile(fileName string, receiver func([]FileInformation)) {
+	infile, err := os.Open(fileName)
 	if err != nil {
-		log.Fatal("Failed to open %s", infileName)
+		log.Fatal("Failed to open %s", fileName)
 	}
 	defer infile.Close()
+	scanner := bufio.NewScanner(infile)
+	lastPrefix := ""
+	files := make([]FileInformation, 0)
+	for scanner.Scan() {
+		line := scanner.Text()
+		idx := strings.Index(line, " ")
+		prefix := line[:idx]
+		fileInfo, err := deserialize(line[idx + 1:])
+		if err != nil {
+			log.Fatalf("Failed to parse %s, %v", line, err)
+		}
+		if prefix != lastPrefix {
+			if len(files) != 0 {
+				receiver(files)
+			}
+			files = files[0:0]
+			lastPrefix = prefix
+		}
+		files = append(files, *fileInfo)
+	}
+	if len(files) != 0 {
+		receiver(files)
+	}
+}
+
+func pass2(infileName string) string {
 	outfile, err := ioutil.TempFile("", "btrdedup")
 	if err != nil {
 		log.Fatalf("Unable to create temprary file")
@@ -302,25 +289,9 @@ func pass2(infileName string) string {
 	log.Printf("Pass 2, writing to %s", outfile.Name())
 	writer := bufio.NewWriter(outfile)
 
-	scanner := bufio.NewScanner(infile)
-	lastOffset := uint64(0)
-	files := make([]FileInformation, 0)
-	for scanner.Scan() {
-		line := scanner.Text()
-		//idx := strings.Index(line, " ")
-		//offset := line[:idx]
-		fileInfo, err := deserialize(line)
-		if err != nil {
-			log.Fatalf("Failed to parse %s, %v", line, err)
-		}
-		if fileInfo.physicalOffset != lastOffset {
-			dumpChecksums(files, writer)
-			files = files[0:0]
-			lastOffset = fileInfo.physicalOffset
-		}
-		files = append(files, *fileInfo)
-	}
-	dumpChecksums(files, writer)
+	partitionFile(infileName, func(files []FileInformation) {
+		dumpChecksums(files, writer)
+	})
 
 	writer.Flush()
 	outfile.Close()
@@ -330,31 +301,11 @@ func pass2(infileName string) string {
 }
 
 func pass3(infileName string, noact bool) {
-	infile, err := os.Open(infileName)
-	if err != nil {
-		log.Fatal("Failed to open %s", infileName)
-	}
-	defer infile.Close()
 	log.Printf("Pass 3, deduplucating files")
 
-	scanner := bufio.NewScanner(infile)
-	var lastHash [16]byte
-	files := make([]FileInformation, 0)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fileInfo, err := deserialize(line)
-		if err != nil {
-			log.Fatalf("Failed to parse %s, %v", line, err)
-		}
-		var hash [16]byte = *fileInfo.csum
-		if hash != lastHash {
-			submitForDedup(files, noact)
-			files = files[0:0]
-			lastHash = hash
-		}
-		files = append(files, *fileInfo)
-	}
-	submitForDedup(files, noact)
+	partitionFile(infileName, func(files []FileInformation) {
+		submitForDedup(files, noact)
+	})
 }
 
 func main() {

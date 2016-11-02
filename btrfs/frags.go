@@ -5,7 +5,6 @@ import (
 	"unsafe"
 	"github.com/bertbaron/btrdedup/ioctl"
 	"github.com/pkg/errors"
-	"fmt"
 )
 
 const (
@@ -69,7 +68,6 @@ func Fragments(file *os.File) ([]Fragment, error) {
 			return nil, errors.New("No (more) extends found")
 		}
 		for _, extend := range data.fm_extents[0:data.fm_mapped_extents] {
-			fmt.Printf("  %d, %+v\n", start, extend)
 			last = last || extend.fe_flags & FIEMAP_EXTENT_LAST != 0
 			if extend.fe_logical != start {
 				return nil, errors.New("Sparse files are not supported")
