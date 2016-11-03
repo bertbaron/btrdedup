@@ -1,18 +1,18 @@
 package main
 
 import (
-	"flag"
-	"github.com/bertbaron/btrdedup/sys"
-	"github.com/bertbaron/btrdedup/storage"
-	"github.com/pkg/errors"
 	"crypto/md5"
+	"flag"
+	"fmt"
+	"github.com/bertbaron/btrdedup/storage"
+	"github.com/bertbaron/btrdedup/sys"
+	"github.com/pkg/errors"
 	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime/pprof"
 	"syscall"
-	"fmt"
 )
 
 const (
@@ -143,14 +143,14 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		filenames[i] = file.Path
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
@@ -211,6 +211,7 @@ func main() {
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
 	memmode := flag.Bool("memmode", false, "if provided, the tool will run in memory mode. By default it uses temporary files which is somewhat slower but more scalable")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
+	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
 
 	if *cpuprofile != "" {
@@ -239,4 +240,13 @@ func main() {
 	pass3(state, *noact)
 
 	log.Println("Done")
+
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.WriteHeapProfile(f)
+		f.Close()
+	}
 }
