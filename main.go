@@ -10,7 +10,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"path/filepath"
 	"runtime/pprof"
 	"syscall"
 )
@@ -18,6 +17,9 @@ import (
 const (
 	minSize int64 = 4 * 1024
 )
+
+// TODO this should preferably not be global state...
+var pathstore = storage.NewPathStorage()
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -30,8 +32,8 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, errors.Wrap(err, "reading dir names failed")
 }
 
-func readFileMeta(path string) (*storage.FileInformation, error) {
-	f, err := os.Open(path)
+func readFileMeta(pathnr int32) (*storage.FileInformation, error) {
+	f, err := os.Open(pathstore.Path(pathnr))
 	if err != nil {
 		return nil, errors.Wrap(err, "open file failed")
 	}
@@ -42,7 +44,7 @@ func readFileMeta(path string) (*storage.FileInformation, error) {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
 	physicalOffset := fragments[0].Start
-	return &storage.FileInformation{path, physicalOffset, 0, nil}, nil
+	return &storage.FileInformation{pathnr, physicalOffset, 0, nil}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -71,7 +73,8 @@ func readChecksum(path string) (*[16]byte, error) {
 // Updates the file information with checksum. Returns true if successful, false otherwise
 // PRE: all files start at the same offset and files is not empty
 func createChecksums(files []*storage.FileInformation, state storage.DedupInterface) bool {
-	path := files[0].Path
+	pathnr := files[0].Path
+	path := pathstore.Path(pathnr)
 	csum, err := readChecksum(path)
 	if err != nil {
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
@@ -83,8 +86,8 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 	return true
 }
 
-// todo: use filepath.Walk
-func collectFileInformation(path string, state storage.DedupInterface) {
+func collectFileInformation(pathnr int32, state storage.DedupInterface) {
+	path := pathstore.Path(pathnr)
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -103,12 +106,13 @@ func collectFileInformation(path string, state storage.DedupInterface) {
 			return
 		}
 		for _, e := range elements {
-			collectFileInformation(filepath.Join(path, e), state)
+			dirnr := pathstore.AddPath(pathnr, e)
+			collectFileInformation(dirnr, state)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > minSize {
-			fileInformation, err := readFileMeta(path)
+			fileInformation, err := readFileMeta(pathnr)
 			if err != nil {
 				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
 				return
@@ -140,7 +144,7 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		if file.PhysicalOffset != physicalOffset {
 			sameOffset = false
 		}
-		filenames[i] = file.Path
+		filenames[i] = pathstore.Path(file.Path)
 	}
 	if sameOffset {
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
@@ -180,7 +184,7 @@ func pass1(filenames []string, state storage.DedupInterface) {
 	log.Printf("Pass 1, collecting fragmentation information")
 	state.StartPass1()
 	for _, filename := range filenames {
-		collectFileInformation(filename, state)
+		collectFileInformation(pathstore.AddPath(-1, filename), state)
 	}
 	state.EndPass1()
 }
