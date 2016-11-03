@@ -262,8 +262,6 @@ func main() {
 
 	fmt.Printf("Statistics: %+v\n", stats)
 
-	log.Println("Done")
-
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)
 		if err != nil {
@@ -272,4 +270,6 @@ func main() {
 		pprof.WriteHeapProfile(f)
 		f.Close()
 	}
+
+	log.Println("Done")
 }
