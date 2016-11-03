@@ -6,10 +6,10 @@ package sys
 import "C"
 
 import (
-	"os"
-	"log"
-	"unsafe"
 	"fmt"
+	"log"
+	"os"
+	"unsafe"
 )
 
 const (
@@ -65,9 +65,9 @@ type BtrfsSameResult struct {
 
 func (result BtrfsSameResult) String() string {
 	s := fmt.Sprintf("Ok, %d bytes deduplicated", result.BytesDeduped)
-	if (result.Error != nil) {
+	if result.Error != nil {
 		s = fmt.Sprintf("Error: %s", result.Error)
-	} else if (result.DataDiffers) {
+	} else if result.DataDiffers {
 		s = "Data was different"
 	}
 	return s
@@ -77,10 +77,10 @@ func makeSameResult(args *sameArgs) []BtrfsSameResult {
 	results := make([]BtrfsSameResult, args.dest_count)
 	for i, element := range args.extend_info[:args.dest_count] {
 		var result BtrfsSameResult
-		if (element.status < 0) {
+		if element.status < 0 {
 			errMsg := C.GoString(C.strerror(C.int(-element.status))) // TODO Do we need to free this?
 			result = BtrfsSameResult{&errMsg, false, 0}
-		} else if (element.status == 1) {
+		} else if element.status == 1 {
 			result = BtrfsSameResult{nil, true, 0}
 		} else {
 			result = BtrfsSameResult{nil, false, element.bytes_deduped}

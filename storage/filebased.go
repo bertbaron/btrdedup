@@ -1,15 +1,15 @@
 package storage
 
 import (
-	"os"
+	"bufio"
+	"bytes"
+	"encoding/base64"
+	"encoding/gob"
 	"io/ioutil"
 	"log"
-	"bufio"
+	"os"
 	"os/exec"
 	"strconv"
-	"bytes"
-	"encoding/gob"
-	"encoding/base64"
 	"strings"
 )
 
@@ -70,7 +70,6 @@ func (state *FileBased) PartitionOnHash(receiver func(files []*FileInformation))
 }
 
 func (state *FileBased) EndPass3() {}
-
 
 // ** private functions **
 
@@ -137,7 +136,7 @@ func partitionFile(fileName string, receiver func([]*FileInformation)) {
 		line := scanner.Text()
 		idx := strings.Index(line, " ")
 		prefix := line[:idx]
-		fileInfo, err := deserialize(line[idx + 1:])
+		fileInfo, err := deserialize(line[idx+1:])
 		if err != nil {
 			log.Fatalf("Failed to parse %s, %v", line, err)
 		}

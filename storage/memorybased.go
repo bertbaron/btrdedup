@@ -92,7 +92,7 @@ func (state *MemoryBased) EndPass2() {}
 func (state *MemoryBased) StartPass3() {}
 
 func (state *MemoryBased) PartitionOnHash(receiver func(files []*FileInformation)) {
-	sort.Sort(ByOffset(state.files))
+	sort.Sort(ByChecksum(state.files))
 
 	var lastHash [16]byte
 	var partition []*FileInformation

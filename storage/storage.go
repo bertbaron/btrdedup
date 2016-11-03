@@ -39,7 +39,7 @@ type pathnode struct {
 	// parent, -1 if there is no parent
 	parent int32
 	// name of this file or directory
-	name	string
+	name string
 }
 
 type pathstore struct {

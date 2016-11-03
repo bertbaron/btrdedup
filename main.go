@@ -21,6 +21,17 @@ const (
 // TODO this should preferably not be global state...
 var pathstore = storage.NewPathStorage()
 
+type statistics struct {
+	add      int
+	hash     int
+	hashTot  int
+	dedupPot int
+	dedupAct int
+	dedupTot int
+}
+
+var stats statistics
+
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
 	f, err := os.Open(dirname)
@@ -80,7 +91,9 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
 		return false
 	}
+	stats.hash += 1
 	for _, file := range files {
+		stats.hashTot += 1
 		file.Csum = csum
 	}
 	return true
@@ -118,6 +131,7 @@ func collectFileInformation(pathnr int32, state storage.DedupInterface) {
 				return
 			}
 			fileInformation.Size = size
+			stats.add += 1
 			state.AddFile(*fileInformation)
 		}
 	}
@@ -125,6 +139,7 @@ func collectFileInformation(pathnr int32, state storage.DedupInterface) {
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []*storage.FileInformation, noact bool) {
+	stats.dedupPot += 1
 	if len(files) < 2 || files[0].Csum == nil {
 		return
 	}
@@ -150,6 +165,8 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
+	stats.dedupAct += 1
+	stats.dedupTot += len(files)
 	if !noact {
 		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
@@ -242,6 +259,8 @@ func main() {
 	pass2(state)
 
 	pass3(state, *noact)
+
+	fmt.Printf("Statistics: %+v\n", stats)
 
 	log.Println("Done")
 
