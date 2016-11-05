@@ -13,6 +13,7 @@ import (
 	"runtime/pprof"
 	"syscall"
 	"golang.org/x/crypto/ssh/terminal"
+	"path/filepath"
 )
 
 const (
@@ -85,6 +86,37 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 		file.Csum = csum
 	}
 	return true
+}
+
+func countFiles(path string) int {
+	count := 0
+	fi, err := os.Lstat(path)
+	if err != nil {
+		log.Printf("Error using os.Lstat on file %s: %v", path, err)
+		return 0
+	}
+
+	if (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0 {
+		return 0
+	}
+
+	switch mode := fi.Mode(); {
+	case mode.IsDir():
+		elements, err := readDirNames(path)
+		if err != nil {
+			log.Printf("Error while reading the contents of directory %s: %v", path, err)
+			return 0
+		}
+		for _, e := range elements {
+			count += countFiles(filepath.Join(path, e))
+		}
+	case mode.IsRegular():
+		size := fi.Size()
+		if size > minSize {
+			count += 1
+		}
+	}
+	return count
 }
 
 func collectFileInformation(pathnr int32, state storage.DedupInterface) {
@@ -185,13 +217,24 @@ func updateOpenFileLimit() {
 	}
 }
 
+func countApplicableFiles(filenames []string) int {
+	fmt.Printf("Counting files\n")
+	count := 0
+	for _, filename := range filenames {
+		count += countFiles(filename)
+	}
+	return count
+}
+
 func pass1(filenames []string, state storage.DedupInterface) {
 	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
+	stats.StartFileinfoProgress()
 	state.StartPass1()
 	for _, filename := range filenames {
 		collectFileInformation(pathstore.AddPath(-1, filename), state)
 	}
 	state.EndPass1()
+	stats.StopProgress()
 }
 
 func pass2(state storage.DedupInterface) {
@@ -267,6 +310,8 @@ func main() {
 		log.Printf("Running in low memory mode")
 		state = storage.NewFileBased()
 	}
+
+	stats.SetFileCount(countApplicableFiles(filenames))
 
 	pass1(filenames, state)
 

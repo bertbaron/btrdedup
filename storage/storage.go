@@ -77,6 +77,7 @@ func (store *pathstore) Path(number int32) string {
 }
 
 type Statistics struct {
+	fileCount  int
 	filesFound int
 	hash       int
 	hashTot    int
@@ -96,8 +97,22 @@ func NewProgressLogStats() *Statistics {
 	return &Statistics{showPb: false}
 }
 
+func (s *Statistics) SetFileCount(count int) {
+	s.fileCount = count
+}
+
+func (s *Statistics) StartFileinfoProgress() {
+	if s.showPb {
+		s.bar = pb.StartNew(s.fileCount)
+		s.bar.SetRefreshRate(time.Second)
+	}
+}
+
 func (s *Statistics) FileAdded() {
 	s.filesFound += 1
+	if s.showPb {
+		s.bar.Set(s.filesFound)
+	}
 }
 
 func (s *Statistics) HashesCalculated(count int) {
