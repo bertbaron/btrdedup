@@ -160,7 +160,7 @@ func (s *Statistics) StartFileinfoProgress() {
 
 func (s *Statistics) FileInfoRead() {
 	if s.showPb {
-		s.bar.Add(s.filesFound)
+		s.bar.Increment()
 	}
 }
 
