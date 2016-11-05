@@ -19,9 +19,6 @@ const (
 	minSize int64 = 4 * 1024
 )
 
-
-
-// TODO this should preferably not be global state...
 var pathstore = storage.NewPathStorage()
 var stats *storage.Statistics
 
@@ -232,17 +229,13 @@ func writeHeapProfile(basename string, suffix string) {
 }
 
 func main() {
-	stats = storage.NewProgressLogStats()
-	if terminal.IsTerminal(int(os.Stdout.Fd())) {
-		stats = storage.NewProgressBarStats()
-	}
-
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]... [FILE-OR-DIR]...\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
-	memmode := flag.Bool("memmode", false, "if provided, the tool will run in memory mode. By default it uses temporary files which is somewhat slower but more scalable")
+	lowmem := flag.Bool("lowmem", false, "if provided, the tool will use much less memory by using temporary files and the external sort command")
+	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
@@ -256,14 +249,24 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
+	stats = storage.NewProgressLogStats()
+	if !*nopb || terminal.IsTerminal(int(os.Stdout.Fd())) {
+		stats = storage.NewProgressBarStats()
+	}
+
 	filenames := flag.Args()
+
+	if len(filenames) < 1 {
+		flag.Usage()
+		return
+	}
 
 	updateOpenFileLimit()
 
-	var state storage.DedupInterface = storage.NewFileBased()
-	if *memmode {
-		log.Printf("Running in memory mode")
-		state = storage.NewMemoryBased()
+	var state storage.DedupInterface = storage.NewMemoryBased()
+	if *lowmem {
+		log.Printf("Running in low memory mode")
+		state = storage.NewFileBased()
 	}
 
 	pass1(filenames, state)
