@@ -34,8 +34,8 @@ func readDirNames(dirname string) ([]string, error) {
 	return names, errors.Wrap(err, "reading dir names failed")
 }
 
-func readFileMeta(pathnr int32) (*storage.FileInformation, error) {
-	f, err := os.Open(pathstore.Path(pathnr))
+func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, errors.Wrap(err, "open file failed")
 	}
@@ -45,7 +45,7 @@ func readFileMeta(pathnr int32) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
-	return &storage.FileInformation{pathnr, fragments, 0, nil}, nil
+	return &storage.FileInformation{pathnr, fragments, nil}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -75,7 +75,7 @@ func readChecksum(path string) (*[16]byte, error) {
 // PRE: all files start at the same offset and files is not empty
 func createChecksums(files []*storage.FileInformation, state storage.DedupInterface) bool {
 	pathnr := files[0].Path
-	path := pathstore.Path(pathnr)
+	path := pathstore.FilePath(pathnr)
 	csum, err := readChecksum(path)
 	if err != nil {
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
@@ -88,39 +88,9 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 	return true
 }
 
-func countFiles(path string) int {
-	count := 0
-	fi, err := os.Lstat(path)
-	if err != nil {
-		log.Printf("Error using os.Lstat on file %s: %v", path, err)
-		return 0
-	}
+func collectFiles(parent int32, name string) {
+	path := filepath.Join(pathstore.FilePath(parent), name)
 
-	if (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0 {
-		return 0
-	}
-
-	switch mode := fi.Mode(); {
-	case mode.IsDir():
-		elements, err := readDirNames(path)
-		if err != nil {
-			log.Printf("Error while reading the contents of directory %s: %v", path, err)
-			return 0
-		}
-		for _, e := range elements {
-			count += countFiles(filepath.Join(path, e))
-		}
-	case mode.IsRegular():
-		size := fi.Size()
-		if size > minSize {
-			count += 1
-		}
-	}
-	return count
-}
-
-func collectFileInformation(pathnr int32, state storage.DedupInterface) {
-	path := pathstore.Path(pathnr)
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -138,24 +108,69 @@ func collectFileInformation(pathnr int32, state storage.DedupInterface) {
 			log.Printf("Error while reading the contents of directory %s: %v", path, err)
 			return
 		}
+		pathnr := pathstore.AddDir(parent, name)
 		for _, e := range elements {
-			dirnr := pathstore.AddPath(pathnr, e)
-			collectFileInformation(dirnr, state)
+			collectFiles(pathnr, e)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > minSize {
-			fileInformation, err := readFileMeta(pathnr)
-			if err != nil {
-				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
-				return
-			}
-			fileInformation.Size = size
-			stats.FileAdded()
-			state.AddFile(*fileInformation)
+			pathstore.AddFile(parent, name)
 		}
 	}
 }
+
+func loadFileInformation(state storage.DedupInterface) {
+	pathstore.ProcessFiles(func (filenr int32, path string) {
+		defer stats.FileInfoRead()
+		fileInformation, err := readFileMeta(filenr, path)
+		if err != nil {
+			log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
+			return
+		}
+		stats.FileAdded()
+		state.AddFile(*fileInformation)
+
+	})
+}
+
+//func collectFileInformation(pathnr int32, state storage.DedupInterface) {
+//	path := pathstore.FilePath(pathnr)
+//	fi, err := os.Lstat(path)
+//	if err != nil {
+//		log.Printf("Error using os.Lstat on file %s: %v", path, err)
+//		return
+//	}
+//
+//	if (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0 {
+//		return
+//	}
+//
+//	switch mode := fi.Mode(); {
+//	case mode.IsDir():
+//		elements, err := readDirNames(path)
+//		if err != nil {
+//			log.Printf("Error while reading the contents of directory %s: %v", path, err)
+//			return
+//		}
+//		for _, e := range elements {
+//			dirnr := pathstore.AddDir(pathnr, e)
+//			collectFileInformation(dirnr, state)
+//		}
+//	case mode.IsRegular():
+//		size := fi.Size()
+//		if size > minSize {
+//			fileInformation, err := readFileMeta(pathnr)
+//			if err != nil {
+//				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
+//				return
+//			}
+//			fileInformation.Size = size
+//			stats.FileAdded()
+//			state.AddFile(*fileInformation)
+//		}
+//	}
+//}
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []*storage.FileInformation, noact bool) {
@@ -167,8 +182,8 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 	// currently we assume that the files are equal up to the size of the smallest file
 	var size int64 = math.MaxInt64
 	for _, file := range files {
-		if file.Size < size {
-			size = file.Size
+		if file.Size() < size {
+			size = file.Size()
 		}
 	}
 
@@ -179,7 +194,7 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		if file.PhysicalOffset() != physicalOffset {
 			sameOffset = false
 		}
-		filenames[i] = pathstore.Path(file.Path)
+		filenames[i] = pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
@@ -217,22 +232,18 @@ func updateOpenFileLimit() {
 	}
 }
 
-func countApplicableFiles(filenames []string) int {
-	fmt.Printf("Counting files\n")
-	count := 0
+func collectApplicableFiles(filenames []string) {
+	fmt.Printf("Searching for applicable files\n")
 	for _, filename := range filenames {
-		count += countFiles(filename)
+		collectFiles(-1, filename)
 	}
-	return count
 }
 
 func pass1(filenames []string, state storage.DedupInterface) {
 	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
 	stats.StartFileinfoProgress()
 	state.StartPass1()
-	for _, filename := range filenames {
-		collectFileInformation(pathstore.AddPath(-1, filename), state)
-	}
+	loadFileInformation(state)
 	state.EndPass1()
 	stats.StopProgress()
 }
@@ -292,7 +303,7 @@ func main() {
 	}
 
 	stats = storage.NewProgressLogStats()
-	if !*nopb || terminal.IsTerminal(int(os.Stdout.Fd())) {
+	if !*nopb && terminal.IsTerminal(int(os.Stdout.Fd())) {
 		stats = storage.NewProgressBarStats()
 	}
 
@@ -311,7 +322,8 @@ func main() {
 		state = storage.NewFileBased()
 	}
 
-	stats.SetFileCount(countApplicableFiles(filenames))
+	collectApplicableFiles(filenames)
+	stats.SetFileCount(pathstore.FileCount())
 
 	pass1(filenames, state)
 
