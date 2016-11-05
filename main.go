@@ -7,50 +7,23 @@ import (
 	"github.com/bertbaron/btrdedup/storage"
 	"github.com/bertbaron/btrdedup/sys"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh/terminal"
-	"gopkg.in/cheggaaa/pb.v1"
-	"time"
 	"log"
 	"math"
 	"os"
 	"runtime/pprof"
 	"syscall"
+	"golang.org/x/crypto/ssh/terminal"
 )
 
 const (
 	minSize int64 = 4 * 1024
 )
 
-type statistics struct {
-	filesFound int
-	hash       int
-	hashTot    int
-	dedupPot   int
-	dedupAct   int
-	dedupTot   int
 
-	bar *pb.ProgressBar
-}
-
-func (s *statistics) FileAdded() {
-	s.filesFound += 1
-}
-
-func (s *statistics) HashesCalculated(count int) {
-	s.hash += 1
-	s.hashTot += count
-	s.bar.Add(count)
-}
-
-func (s *statistics) Deduplicating(count int) {
-	s.dedupPot += count
-	s.bar.Add(count)
-}
 
 // TODO this should preferably not be global state...
 var pathstore = storage.NewPathStorage()
-var stats statistics
-var updateInterval time.Duration
+var stats *storage.Statistics
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -181,16 +154,16 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		filenames[i] = pathstore.Path(file.Path)
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
 		return
 	}
-	stats.dedupAct += 1
-	stats.dedupTot += len(files)
+	//stats.dedupAct += 1
+	//stats.dedupTot += len(files)
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 	}
 }
 
@@ -217,7 +190,7 @@ func updateOpenFileLimit() {
 }
 
 func pass1(filenames []string, state storage.DedupInterface) {
-	fmt.Printf("Pass 1, collecting fragmentation information\n")
+	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
 	state.StartPass1()
 	for _, filename := range filenames {
 		collectFileInformation(pathstore.AddPath(-1, filename), state)
@@ -226,27 +199,25 @@ func pass1(filenames []string, state storage.DedupInterface) {
 }
 
 func pass2(state storage.DedupInterface) {
-	fmt.Printf("Pass 2, calculating hashes for first block of files\n")
-	stats.bar = pb.StartNew(stats.filesFound)
-	stats.bar.SetRefreshRate(updateInterval)
+	fmt.Printf("Pass 2 of 3, calculating hashes for first block of files\n")
+	stats.StartHashProgress()
 	state.StartPass2()
 	state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
 		return createChecksums(files, state)
 	})
 	state.EndPass2()
-	stats.bar.Finish()
+	stats.StopProgress()
 }
 
 func pass3(state storage.DedupInterface, noact bool) {
-	fmt.Printf("Pass 3, deduplucating files\n")
-	stats.bar = pb.StartNew(stats.filesFound)
-	stats.bar.SetRefreshRate(updateInterval)
+	fmt.Printf("Pass 3 of 3, deduplucating files\n")
+	stats.StartDedupProgress()
 	state.StartPass3()
 	state.PartitionOnHash(func(files []*storage.FileInformation) {
 		submitForDedup(files, noact)
 	})
 	state.EndPass3()
-	stats.bar.Finish()
+	stats.StopProgress()
 }
 
 func writeHeapProfile(basename string, suffix string) {
@@ -261,9 +232,9 @@ func writeHeapProfile(basename string, suffix string) {
 }
 
 func main() {
-	updateInterval = time.Minute
+	stats = storage.NewProgressLogStats()
 	if terminal.IsTerminal(int(os.Stdout.Fd())) {
-		updateInterval = time.Second
+		stats = storage.NewProgressBarStats()
 	}
 
 	flag.Usage = func() {

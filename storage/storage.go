@@ -1,6 +1,10 @@
 package storage
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"gopkg.in/cheggaaa/pb.v1"
+	"time"
+)
 
 type FileInformation struct {
 	// Number from the PathStorage
@@ -39,7 +43,7 @@ type pathnode struct {
 	// parent, -1 if there is no parent
 	parent int32
 	// name of this file or directory
-	name string
+	name   string
 }
 
 type pathstore struct {
@@ -65,4 +69,61 @@ func (store *pathstore) Path(number int32) string {
 		return path.name
 	}
 	return filepath.Join(store.Path(path.parent), path.name)
+}
+
+type Statistics struct {
+	filesFound int
+	hash       int
+	hashTot    int
+	dedupPot   int
+	dedupAct   int
+	dedupTot   int
+
+	showPb     bool
+	bar        *pb.ProgressBar
+}
+
+func NewProgressBarStats() *Statistics {
+	return &Statistics{showPb: true}
+}
+
+func NewProgressLogStats() *Statistics {
+	return &Statistics{showPb: false}
+}
+
+func (s *Statistics) FileAdded() {
+	s.filesFound += 1
+}
+
+func (s *Statistics) HashesCalculated(count int) {
+	s.hash += 1
+	s.hashTot += count
+	if s.showPb {
+		s.bar.Add(count)
+	}
+}
+
+func (s *Statistics) Deduplicating(count int) {
+	s.dedupPot += count
+	s.bar.Add(count)
+}
+
+func (s *Statistics) StartHashProgress() {
+	if s.showPb {
+		s.bar = pb.StartNew(s.filesFound)
+		s.bar.SetRefreshRate(time.Second)
+	}
+}
+
+func (s *Statistics) StartDedupProgress() {
+	if s.showPb {
+		s.bar = pb.StartNew(s.filesFound)
+		s.bar.SetRefreshRate(time.Second)
+	}
+}
+
+func (s *Statistics) StopProgress() {
+	if s.showPb {
+		s.bar.Finish()
+	}
 }
