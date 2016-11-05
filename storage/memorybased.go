@@ -18,7 +18,7 @@ func (fis ByOffset) Swap(i, j int) {
 	fis[i], fis[j] = fis[j], fis[i]
 }
 func (fis ByOffset) Less(i, j int) bool {
-	return fis[i].PhysicalOffset < fis[j].PhysicalOffset
+	return fis[i].PhysicalOffset() < fis[j].PhysicalOffset()
 }
 
 func (fis ByChecksum) Len() int {
@@ -71,12 +71,12 @@ func (state *MemoryBased) PartitionOnOffset(receiver func(files []*FileInformati
 	lastOffset := uint64(0)
 	var partition []*FileInformation
 	for _, file := range state.files {
-		if file.PhysicalOffset != lastOffset {
+		if file.PhysicalOffset() != lastOffset {
 			if len(partition) != 0 {
 				receiver(partition)
 			}
 			partition = partition[0:0]
-			lastOffset = file.PhysicalOffset
+			lastOffset = file.PhysicalOffset()
 		}
 		partition = append(partition, file)
 	}

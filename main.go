@@ -44,8 +44,7 @@ func readFileMeta(pathnr int32) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
-	physicalOffset := fragments[0].Start
-	return &storage.FileInformation{pathnr, physicalOffset, 0, nil}, nil
+	return &storage.FileInformation{pathnr, fragments, 0, nil}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -143,9 +142,9 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 
 	filenames := make([]string, len(files))
 	sameOffset := true
-	physicalOffset := files[0].PhysicalOffset
+	physicalOffset := files[0].PhysicalOffset()
 	for i, file := range files {
-		if file.PhysicalOffset != physicalOffset {
+		if file.PhysicalOffset() != physicalOffset {
 			sameOffset = false
 		}
 		filenames[i] = pathstore.Path(file.Path)

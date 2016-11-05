@@ -4,14 +4,19 @@ import (
 	"path/filepath"
 	"gopkg.in/cheggaaa/pb.v1"
 	"time"
+	"github.com/bertbaron/btrdedup/sys"
 )
 
 type FileInformation struct {
 	// Number from the PathStorage
-	Path           int32
-	PhysicalOffset uint64
-	Size           int64
-	Csum           *[16]byte
+	Path      int32
+	Fragments []sys.Fragment
+	Size      int64
+	Csum      *[16]byte
+}
+
+func (f *FileInformation) PhysicalOffset() uint64 {
+	return f.Fragments[0].Start
 }
 
 type DedupInterface interface {

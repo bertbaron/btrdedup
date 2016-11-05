@@ -30,7 +30,7 @@ func (state *FileBased) StartPass1() {
 }
 
 func (state *FileBased) AddFile(file FileInformation) {
-	prefix := strconv.FormatInt(int64(file.PhysicalOffset), 36)
+	prefix := strconv.FormatInt(int64(file.PhysicalOffset()), 36)
 	writeFileInfo(prefix, file, state.writer)
 
 }
