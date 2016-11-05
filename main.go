@@ -89,7 +89,10 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 }
 
 func collectFiles(parent int32, name string) {
-	path := filepath.Join(pathstore.FilePath(parent), name)
+	path := name
+	if parent >=0 {
+		path = filepath.Join(pathstore.DirPath(parent), name)
+	}
 
 	fi, err := os.Lstat(path)
 	if err != nil {

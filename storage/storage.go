@@ -45,6 +45,8 @@ type DedupInterface interface {
 
 // Stores pathnames in an efficient way. Directories and files are stored separately an can as such have the same
 // number, because we are in the end only interested in files, not in directories
+// Note that this interface is a bit tricky because the caller always need to know if he deals with a directory or a file.
+// It shouldn't cost too much to improve this...
 type PathStorage interface {
 	// Adds the given path. Use parent -1 to add a root. Panics if the parent does not exist
 	AddDir(parent int32, name string) int32
@@ -54,6 +56,9 @@ type PathStorage interface {
 
 	// Returns the path of the file for the given number. Panics if it doesn't exist
 	FilePath(number int32) string
+
+	// Returns the path of the directory for the given number. Panics if it doesn't exist
+	DirPath(number int32) string
 
 	// Passes all the file names (not the dir names) to the consumer function
 	ProcessFiles(consumer func(filenr int32, filename string))
@@ -95,12 +100,12 @@ func (store *pathstore) AddFile(parent int32, name string) int32 {
 	return int32(len(store.files)) - 1
 }
 
-func (store *pathstore) dirPath(number int32) string {
+func (store *pathstore) DirPath(number int32) string {
 	path := &store.dirs[number]
 	if path.parent == -1 {
 		return path.name
 	}
-	return filepath.Join(store.dirPath(path.parent), path.name)
+	return filepath.Join(store.DirPath(path.parent), path.name)
 }
 
 func (store *pathstore) FilePath(number int32) string {
@@ -108,7 +113,7 @@ func (store *pathstore) FilePath(number int32) string {
 	if path.parent == -1 {
 		return path.name
 	}
-	return filepath.Join(store.dirPath(path.parent), path.name)
+	return filepath.Join(store.DirPath(path.parent), path.name)
 }
 
 func (store *pathstore) ProcessFiles(consumer func(filenr int32, filename string)) {
