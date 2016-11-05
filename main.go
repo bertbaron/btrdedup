@@ -7,6 +7,9 @@ import (
 	"github.com/bertbaron/btrdedup/storage"
 	"github.com/bertbaron/btrdedup/sys"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/ssh/terminal"
+	"gopkg.in/cheggaaa/pb.v1"
+	"time"
 	"log"
 	"math"
 	"os"
@@ -18,19 +21,36 @@ const (
 	minSize int64 = 4 * 1024
 )
 
-// TODO this should preferably not be global state...
-var pathstore = storage.NewPathStorage()
-
 type statistics struct {
-	add      int
-	hash     int
-	hashTot  int
-	dedupPot int
-	dedupAct int
-	dedupTot int
+	filesFound int
+	hash       int
+	hashTot    int
+	dedupPot   int
+	dedupAct   int
+	dedupTot   int
+
+	bar *pb.ProgressBar
 }
 
+func (s *statistics) FileAdded() {
+	s.filesFound += 1
+}
+
+func (s *statistics) HashesCalculated(count int) {
+	s.hash += 1
+	s.hashTot += count
+	s.bar.Add(count)
+}
+
+func (s *statistics) Deduplicating(count int) {
+	s.dedupPot += count
+	s.bar.Add(count)
+}
+
+// TODO this should preferably not be global state...
+var pathstore = storage.NewPathStorage()
 var stats statistics
+var updateInterval time.Duration
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -91,9 +111,8 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
 		return false
 	}
-	stats.hash += 1
+	stats.HashesCalculated(len(files))
 	for _, file := range files {
-		stats.hashTot += 1
 		file.Csum = csum
 	}
 	return true
@@ -131,7 +150,7 @@ func collectFileInformation(pathnr int32, state storage.DedupInterface) {
 				return
 			}
 			fileInformation.Size = size
-			stats.add += 1
+			stats.FileAdded()
 			state.AddFile(*fileInformation)
 		}
 	}
@@ -139,7 +158,7 @@ func collectFileInformation(pathnr int32, state storage.DedupInterface) {
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []*storage.FileInformation, noact bool) {
-	stats.dedupPot += 1
+	stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
 	if len(files) < 2 || files[0].Csum == nil {
 		return
 	}
@@ -198,7 +217,7 @@ func updateOpenFileLimit() {
 }
 
 func pass1(filenames []string, state storage.DedupInterface) {
-	log.Printf("Pass 1, collecting fragmentation information")
+	fmt.Printf("Pass 1, collecting fragmentation information\n")
 	state.StartPass1()
 	for _, filename := range filenames {
 		collectFileInformation(pathstore.AddPath(-1, filename), state)
@@ -207,24 +226,46 @@ func pass1(filenames []string, state storage.DedupInterface) {
 }
 
 func pass2(state storage.DedupInterface) {
-	log.Printf("Pass 2, calculating hashes for first block of files")
+	fmt.Printf("Pass 2, calculating hashes for first block of files\n")
+	stats.bar = pb.StartNew(stats.filesFound)
+	stats.bar.SetRefreshRate(updateInterval)
 	state.StartPass2()
 	state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
 		return createChecksums(files, state)
 	})
 	state.EndPass2()
+	stats.bar.Finish()
 }
 
 func pass3(state storage.DedupInterface, noact bool) {
-	log.Printf("Pass 3, deduplucating files")
+	fmt.Printf("Pass 3, deduplucating files\n")
+	stats.bar = pb.StartNew(stats.filesFound)
+	stats.bar.SetRefreshRate(updateInterval)
 	state.StartPass3()
 	state.PartitionOnHash(func(files []*storage.FileInformation) {
 		submitForDedup(files, noact)
 	})
 	state.EndPass3()
+	stats.bar.Finish()
+}
+
+func writeHeapProfile(basename string, suffix string) {
+	if basename != "" {
+		f, err := os.Create(basename + suffix + ".mprof")
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.WriteHeapProfile(f)
+		f.Close()
+	}
 }
 
 func main() {
+	updateInterval = time.Minute
+	if terminal.IsTerminal(int(os.Stdout.Fd())) {
+		updateInterval = time.Second
+	}
+
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]... [FILE-OR-DIR]...\n", os.Args[0])
 		flag.PrintDefaults()
@@ -236,7 +277,7 @@ func main() {
 	flag.Parse()
 
 	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
+		f, err := os.Create((*cpuprofile) + ".prof")
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -256,20 +297,17 @@ func main() {
 
 	pass1(filenames, state)
 
+	writeHeapProfile(*memprofile, "_pass1")
+
 	pass2(state)
+
+	writeHeapProfile(*memprofile, "_pass1")
 
 	pass3(state, *noact)
 
+	writeHeapProfile(*memprofile, "_pass1")
+
 	fmt.Printf("Statistics: %+v\n", stats)
 
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.WriteHeapProfile(f)
-		f.Close()
-	}
-
-	log.Println("Done")
+	fmt.Println("Done")
 }

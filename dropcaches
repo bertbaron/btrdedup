@@ -1,0 +1,8 @@
+#!/bin/bash
+#
+# Can be used to drop the file system cache in order to get more realistic
+# benchmark results.
+#
+set -eu
+
+free && sync && echo 3 > /proc/sys/vm/drop_caches && free

@@ -2,3 +2,5 @@
 *.iml
 local
 *.prof
+*.mprof
+*.log
