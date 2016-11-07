@@ -7,13 +7,13 @@ import (
 	"github.com/bertbaron/btrdedup/storage"
 	"github.com/bertbaron/btrdedup/sys"
 	"github.com/pkg/errors"
+	"golang.org/x/crypto/ssh/terminal"
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"runtime/pprof"
 	"syscall"
-	"golang.org/x/crypto/ssh/terminal"
-	"path/filepath"
 )
 
 const (
@@ -90,7 +90,7 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 
 func collectFiles(parent int32, name string) {
 	path := name
-	if parent >=0 {
+	if parent >= 0 {
 		path = filepath.Join(pathstore.DirPath(parent), name)
 	}
 
@@ -124,7 +124,7 @@ func collectFiles(parent int32, name string) {
 }
 
 func loadFileInformation(state storage.DedupInterface) {
-	pathstore.ProcessFiles(func (filenr int32, path string) {
+	pathstore.ProcessFiles(func(filenr int32, path string) {
 		defer stats.FileInfoRead()
 		fileInformation, err := readFileMeta(filenr, path)
 		if err != nil {
@@ -200,16 +200,16 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		filenames[i] = pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
 	//stats.dedupAct += 1
 	//stats.dedupTot += len(files)
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
@@ -339,8 +339,6 @@ func main() {
 	pass3(state, *noact)
 
 	writeHeapProfile(*memprofile, "_pass1")
-
-	fmt.Printf("Statistics: %+v\n", stats)
 
 	fmt.Println("Done")
 }

@@ -1,10 +1,11 @@
 package storage
 
 import (
-	"path/filepath"
-	"gopkg.in/cheggaaa/pb.v1"
-	"time"
 	"github.com/bertbaron/btrdedup/sys"
+	"gopkg.in/cheggaaa/pb.v1"
+	"log"
+	"path/filepath"
+	"time"
 )
 
 type FileInformation struct {
@@ -71,12 +72,12 @@ type pathnode struct {
 	// parent, -1 if there is no parent
 	parent int32
 	// name of this file or directory
-	name   string
+	name string
 }
 
 type pathstore struct {
 	// in-trees
-	dirs []pathnode
+	dirs  []pathnode
 	files []pathnode
 }
 
@@ -126,17 +127,52 @@ func (store *pathstore) FileCount() int {
 	return len(store.files)
 }
 
+type progressBar interface {
+	Add(count int) int
+	Finish()
+}
+
+func newConsoleProgressBar(count int) progressBar {
+	bar := pb.StartNew(count)
+	bar.SetRefreshRate(time.Second)
+	return bar
+}
+
+type logProgressBar struct {
+	total      int
+	count      int
+	lastLogged int
+}
+
+func (b *logProgressBar) Add(count int) int {
+	b.count += count
+	if b.total > 0 {
+		percentage := b.count * 100 / b.total
+		if percentage > b.lastLogged {
+			log.Printf("Progress: %d (%d/%d)", percentage, b.count, b.total)
+			b.lastLogged = percentage
+		}
+	}
+	return b.count
+}
+
+func (b *logProgressBar) Finish() {
+	// TODO
+}
+
+func newLogProgressBar(count int) progressBar {
+	return &logProgressBar{total: count}
+}
+
 type Statistics struct {
 	fileCount  int
 	filesFound int
-	hash       int
 	hashTot    int
-	dedupPot   int
-	dedupAct   int
-	dedupTot   int
 
-	showPb     bool
-	bar        *pb.ProgressBar
+	showPb   bool
+	progress progressBar
+	passName string
+	start    time.Time
 }
 
 func NewProgressBarStats() *Statistics {
@@ -147,21 +183,35 @@ func NewProgressLogStats() *Statistics {
 	return &Statistics{showPb: false}
 }
 
+func (s *Statistics) startProgress(name string, count int) {
+	s.passName = name
+	s.start = time.Now()
+	s.progress = newLogProgressBar(count)
+	if s.showPb {
+		s.progress = newConsoleProgressBar(count)
+	}
+}
+
+func (s *Statistics) updateProgress(count int) {
+	s.progress.Add(count)
+}
+
+func (s *Statistics) StopProgress() {
+	duration := time.Since(s.start)
+	s.progress.Finish()
+	log.Printf("Pass %s completed in %s", s.passName, duration)
+}
+
 func (s *Statistics) SetFileCount(count int) {
 	s.fileCount = count
 }
 
 func (s *Statistics) StartFileinfoProgress() {
-	if s.showPb {
-		s.bar = pb.StartNew(s.fileCount)
-		s.bar.SetRefreshRate(time.Second)
-	}
+	s.startProgress("Collecting file information", s.fileCount)
 }
 
 func (s *Statistics) FileInfoRead() {
-	if s.showPb {
-		s.bar.Increment()
-	}
+	s.updateProgress(1)
 }
 
 func (s *Statistics) FileAdded() {
@@ -169,34 +219,18 @@ func (s *Statistics) FileAdded() {
 }
 
 func (s *Statistics) HashesCalculated(count int) {
-	s.hash += 1
 	s.hashTot += count
-	if s.showPb {
-		s.bar.Add(count)
-	}
+	s.updateProgress(count)
 }
 
 func (s *Statistics) Deduplicating(count int) {
-	s.dedupPot += count
-	s.bar.Add(count)
+	s.updateProgress(count)
 }
 
 func (s *Statistics) StartHashProgress() {
-	if s.showPb {
-		s.bar = pb.StartNew(s.filesFound)
-		s.bar.SetRefreshRate(time.Second)
-	}
+	s.startProgress("Calculating hashes for first block of each file", s.filesFound)
 }
 
 func (s *Statistics) StartDedupProgress() {
-	if s.showPb {
-		s.bar = pb.StartNew(s.filesFound)
-		s.bar.SetRefreshRate(time.Second)
-	}
-}
-
-func (s *Statistics) StopProgress() {
-	if s.showPb {
-		s.bar.Finish()
-	}
+	s.startProgress("Deduplication", s.hashTot)
 }
