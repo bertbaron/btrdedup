@@ -128,7 +128,7 @@ func loadFileInformation(state storage.DedupInterface) {
 		defer stats.FileInfoRead()
 		fileInformation, err := readFileMeta(filenr, path)
 		if err != nil {
-			log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
+			//log.Printf("Error while trying to get the fragments of file %s: %v", path, err)
 			return
 		}
 		stats.FileAdded()
@@ -200,16 +200,16 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		filenames[i] = pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
+		//log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
 	//stats.dedupAct += 1
 	//stats.dedupTot += len(files)
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		//log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		//log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
@@ -244,33 +244,33 @@ func collectApplicableFiles(filenames []string) {
 
 func pass1(filenames []string, state storage.DedupInterface) {
 	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
-	stats.StartFileinfoProgress()
 	state.StartPass1()
+	stats.StartFileinfoProgress()
 	loadFileInformation(state)
-	state.EndPass1()
 	stats.StopProgress()
+	state.EndPass1()
 }
 
 func pass2(state storage.DedupInterface) {
 	fmt.Printf("Pass 2 of 3, calculating hashes for first block of files\n")
-	stats.StartHashProgress()
 	state.StartPass2()
+	stats.StartHashProgress()
 	state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
 		return createChecksums(files, state)
 	})
-	state.EndPass2()
 	stats.StopProgress()
+	state.EndPass2()
 }
 
 func pass3(state storage.DedupInterface, noact bool) {
 	fmt.Printf("Pass 3 of 3, deduplucating files\n")
-	stats.StartDedupProgress()
 	state.StartPass3()
+	stats.StartDedupProgress()
 	state.PartitionOnHash(func(files []*storage.FileInformation) {
 		submitForDedup(files, noact)
 	})
-	state.EndPass3()
 	stats.StopProgress()
+	state.EndPass3()
 }
 
 func writeHeapProfile(basename string, suffix string) {

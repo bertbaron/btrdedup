@@ -37,6 +37,7 @@ func (state *FileBased) AddFile(file FileInformation) {
 
 func (state *FileBased) EndPass1() {
 	closeWriterAndSaveFilename(state)
+	sortFile(state.infilename)
 }
 
 // ** PASS 2 **
@@ -59,6 +60,7 @@ func (state *FileBased) PartitionOnOffset(receiver func(files []*FileInformation
 
 func (state *FileBased) EndPass2() {
 	closeWriterAndSaveFilename(state)
+	sortFile(state.infilename)
 }
 
 // ** PASS 3 **
@@ -123,7 +125,6 @@ func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Write
 }
 
 func partitionFile(fileName string, receiver func([]*FileInformation)) {
-	sortFile(fileName)
 	infile, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal("Failed to open %s", fileName)

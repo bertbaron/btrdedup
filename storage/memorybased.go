@@ -59,15 +59,15 @@ func (state *MemoryBased) AddFile(file FileInformation) {
 	state.files = append(state.files, &file)
 }
 
-func (state *MemoryBased) EndPass1() {}
+func (state *MemoryBased) EndPass1() {
+	sort.Sort(ByOffset(state.files))
+}
 
 // ** PASS 2 **
 
 func (state *MemoryBased) StartPass2() {}
 
 func (state *MemoryBased) PartitionOnOffset(receiver func(files []*FileInformation) bool) {
-	sort.Sort(ByOffset(state.files))
-
 	lastOffset := uint64(0)
 	var partition []*FileInformation
 	for _, file := range state.files {
@@ -85,15 +85,15 @@ func (state *MemoryBased) PartitionOnOffset(receiver func(files []*FileInformati
 	}
 }
 
-func (state *MemoryBased) EndPass2() {}
+func (state *MemoryBased) EndPass2() {
+	sort.Sort(ByChecksum(state.files))
+}
 
 // ** PASS 3 **
 
 func (state *MemoryBased) StartPass3() {}
 
 func (state *MemoryBased) PartitionOnHash(receiver func(files []*FileInformation)) {
-	sort.Sort(ByChecksum(state.files))
-
 	var lastHash [16]byte
 	var partition []*FileInformation
 	for _, file := range state.files {
