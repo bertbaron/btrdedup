@@ -45,7 +45,7 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
-	return &storage.FileInformation{pathnr, fragments, nil}, nil
+	return &storage.FileInformation{Path: pathnr, Fragments: fragments}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -79,11 +79,14 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 	csum, err := readChecksum(path)
 	if err != nil {
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
+		for _, file := range files {
+			file.Error = true
+		}
 		return false
 	}
 	stats.HashesCalculated(len(files))
 	for _, file := range files {
-		file.Csum = csum
+		file.Csum = *csum
 	}
 	return true
 }
@@ -137,48 +140,10 @@ func loadFileInformation(state storage.DedupInterface) {
 	})
 }
 
-//func collectFileInformation(pathnr int32, state storage.DedupInterface) {
-//	path := pathstore.FilePath(pathnr)
-//	fi, err := os.Lstat(path)
-//	if err != nil {
-//		log.Printf("Error using os.Lstat on file %s: %v", path, err)
-//		return
-//	}
-//
-//	if (fi.Mode() & (os.ModeSymlink | os.ModeNamedPipe)) != 0 {
-//		return
-//	}
-//
-//	switch mode := fi.Mode(); {
-//	case mode.IsDir():
-//		elements, err := readDirNames(path)
-//		if err != nil {
-//			log.Printf("Error while reading the contents of directory %s: %v", path, err)
-//			return
-//		}
-//		for _, e := range elements {
-//			dirnr := pathstore.AddDir(pathnr, e)
-//			collectFileInformation(dirnr, state)
-//		}
-//	case mode.IsRegular():
-//		size := fi.Size()
-//		if size > minSize {
-//			fileInformation, err := readFileMeta(pathnr)
-//			if err != nil {
-//				log.Printf("Error while trying to get the physical offset of file %s: %v", path, err)
-//				return
-//			}
-//			fileInformation.Size = size
-//			stats.FileAdded()
-//			state.AddFile(*fileInformation)
-//		}
-//	}
-//}
-
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
 func submitForDedup(files []*storage.FileInformation, noact bool) {
 	stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
-	if len(files) < 2 || files[0].Csum == nil {
+	if len(files) < 2 || files[0].Error {
 		return
 	}
 

@@ -8,11 +8,16 @@ import (
 	"time"
 )
 
+const (
+	HashSize = 16
+)
+
 type FileInformation struct {
 	// Number from the PathStorage
 	Path      int32
+	Error     bool
 	Fragments []sys.Fragment
-	Csum      *[16]byte
+	Csum      [HashSize]byte
 }
 
 func (f *FileInformation) PhysicalOffset() uint64 {

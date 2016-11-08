@@ -30,12 +30,6 @@ func (fis ByChecksum) Swap(i, j int) {
 func (fis ByChecksum) Less(i, j int) bool {
 	a := fis[i].Csum
 	b := fis[j].Csum
-	if a == nil {
-		return true
-	}
-	if b == nil {
-		return false
-	}
 	for i, v := range a {
 		if v < b[i] {
 			return true
@@ -97,13 +91,13 @@ func (state *MemoryBased) PartitionOnHash(receiver func(files []*FileInformation
 	var lastHash [16]byte
 	var partition []*FileInformation
 	for _, file := range state.files {
-		if file.Csum != nil {
-			if *file.Csum != lastHash {
+		if !file.Error {
+			if file.Csum != lastHash {
 				if len(partition) != 0 {
 					receiver(partition)
 				}
 				partition = partition[0:0]
-				lastHash = *file.Csum
+				lastHash = file.Csum
 			}
 			partition = append(partition, file)
 		}
