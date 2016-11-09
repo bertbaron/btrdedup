@@ -6,7 +6,17 @@ import (
 	"github.com/bertbaron/btrdedup/sys"
 )
 
-func TestSerialization(*testing.T) {
+func equalsInfo(a, b FileInformation) bool {
+	equal := a.Path == b.Path && a.Error == b.Error && len(a.Fragments) == len(b.Fragments) && a.Csum == b.Csum
+	if equal {
+		for i, frag := range a.Fragments {
+			equal = equal && frag == b.Fragments[i]
+		}
+	}
+	return equal
+}
+
+func TestSerialization(t *testing.T) {
 	var in FileInformation
 	in.Path = 123
 	in.Error = true
@@ -15,4 +25,16 @@ func TestSerialization(*testing.T) {
 
 	data := serialize(in)
 	fmt.Printf("data size: %d (%v)\n", len(data), data)
+
+	out, err := deserialize(data)
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if out == nil {
+		t.Error("Deserialization should return an error or a result")
+	}
+	out.Csum = in.Csum
+	if !equalsInfo(in, *out) {
+		t.Errorf("Exepected: %+v, but was: %+v", in, out)
+	}
 }

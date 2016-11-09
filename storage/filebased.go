@@ -2,6 +2,7 @@ package storage
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/base64"
 	"io/ioutil"
 	"log"
@@ -9,7 +10,9 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"unsafe"
+	"fmt"
+	"github.com/bertbaron/btrdedup/sys"
+	"github.com/pkg/errors"
 )
 
 type FileBased struct {
@@ -46,7 +49,7 @@ func (state *FileBased) StartPass2() {
 }
 
 func (state *FileBased) PartitionOnOffset(receiver func(files []*FileInformation) bool) {
-	partitionFile(state.infilename, func(files []*FileInformation) {
+	partitionFile(state.infilename, false, func(files []*FileInformation) {
 		if receiver(files) {
 			for _, file := range files {
 				prefix := base64.StdEncoding.EncodeToString(file.Csum[:])
@@ -67,7 +70,7 @@ func (state *FileBased) EndPass2() {
 func (state *FileBased) StartPass3() {}
 
 func (state *FileBased) PartitionOnHash(receiver func(files []*FileInformation)) {
-	partitionFile(state.infilename, receiver)
+	partitionFile(state.infilename, true, receiver)
 }
 
 func (state *FileBased) EndPass3() {}
@@ -91,39 +94,73 @@ func closeWriterAndSaveFilename(state *FileBased) {
 	state.infilename = state.outfile.Name()
 }
 
-// returns a byte slice around the actual struct data!
-func unsafeBytes(fileInfo *FileInformation) []byte {
-	ptr := unsafe.Pointer(&fileInfo)
-	size := unsafe.Sizeof(fileInfo)
-	bytes := (*[1 << 31]byte)(ptr)[:size:size]
-	return bytes
+func bool2int(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func writeInt(buff *bytes.Buffer, value int64, size int) {
+	for i := 0; i < size; i++ {
+		buff.WriteByte(byte(value & 0xFF))
+		value >>= 8
+	}
+}
+
+func readInt(buff *bytes.Buffer, size int) int64 {
+	value := int64(0)
+	for i := 0; i < size; i++ {
+		byte, err := buff.ReadByte()
+		if err != nil {
+			panic(err)
+		}
+		value = value | (int64(byte) << (uint(i) * 8))
+	}
+	return value
 }
 
 func serialize(fileInfo FileInformation) string {
-	//	ptr := unsafe.Pointer(&fileInfo)a
-	//	size := unsafe.Sizeof(fileInfo)
-	//	bytes := (*[1<<31]byte)(ptr)[:size:size]
-	//return base64.StdEncoding.EncodeToString(unsafeBytes(&fileInfo))
-	return base64.StdEncoding.EncodeToString(binary.unsafeBytes(&fileInfo))
+	buf := new(bytes.Buffer)
+	writeInt(buf, int64(fileInfo.Path), 4)
+	writeInt(buf, bool2int(fileInfo.Error), 1)
+	writeInt(buf, int64(len(fileInfo.Fragments)), 4)
+	for _, frag := range fileInfo.Fragments {
+		writeInt(buf, int64(frag.Start), 8)
+		writeInt(buf, int64(frag.Length), 8)
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
-func deserialize(line string) (*FileInformation, error) {
+func deserialize(line string) (fileInfo *FileInformation, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var ok bool
+			err, ok = r.(error)
+			if !ok {
+				err = fmt.Errorf("pkg: %v", r)
+			}
+			err = errors.Wrapf(err, "Failed to parse %v", line)
+		}
+	}()
+
 	data, err := base64.StdEncoding.DecodeString(line)
 	if err != nil {
 		return nil, err
 	}
-	var fileInfo FileInformation
-	bytes := unsafeBytes(&fileInfo)
-	copy(bytes, data)
-	// TODO Perform some senity checks before and/or after parsing
-	//	buffer := bytes.NewReader(data)
-	//	dec := gob.NewDecoder(buffer)
-	//	fileInfo := new(FileInformation)
-	//	err = dec.Decode(fileInfo)
-	//	if err != nil {
-	//		return nil, err
-	//	}
-	return &fileInfo, nil
+	buff := bytes.NewBuffer(data)
+	fileInfo = new(FileInformation)
+	fileInfo.Path = int32(readInt(buff, 4))
+	fileInfo.Error = readInt(buff, 1) != 0
+	frags := int(readInt(buff, 4))
+	fileInfo.Fragments = make([]sys.Fragment, frags)
+	for i := 0; i < frags; i++ {
+		start := uint64(readInt(buff, 8))
+		end := uint64(readInt(buff, 8))
+		fileInfo.Fragments[i] = sys.Fragment{start, end}
+	}
+
+	return fileInfo, nil
 }
 
 func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Writer) {
@@ -133,7 +170,17 @@ func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Write
 	outfile.WriteByte('\n')
 }
 
-func partitionFile(fileName string, receiver func([]*FileInformation)) {
+func parseHash(s string) (hash [HashSize]byte, err error) {
+	bytes, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return
+	}
+	copy(hash[:], bytes)
+	return
+}
+
+// TODO using panic/recover for the whole parse stack would probably be more readable
+func partitionFile(fileName string, prefixIsHash bool, receiver func([]*FileInformation)) {
 	infile, err := os.Open(fileName)
 	if err != nil {
 		log.Fatal("Failed to open %s", fileName)
@@ -146,9 +193,15 @@ func partitionFile(fileName string, receiver func([]*FileInformation)) {
 		line := scanner.Text()
 		idx := strings.Index(line, " ")
 		prefix := line[:idx]
-		fileInfo, err := deserialize(line[idx+1:])
+		fileInfo, err := deserialize(line[idx + 1:])
 		if err != nil {
 			log.Fatalf("Failed to parse %s, %v", line, err)
+		}
+		if prefixIsHash {
+			fileInfo.Csum, err = parseHash(prefix)
+			if err != nil {
+				log.Fatalf("Failed to parse %s, %v", line, err)
+			}
 		}
 		if prefix != lastPrefix {
 			if len(files) != 0 {
