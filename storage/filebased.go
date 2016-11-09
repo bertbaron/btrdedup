@@ -2,15 +2,14 @@ package storage
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/base64"
-	"encoding/gob"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"unsafe"
 )
 
 type FileBased struct {
@@ -92,14 +91,20 @@ func closeWriterAndSaveFilename(state *FileBased) {
 	state.infilename = state.outfile.Name()
 }
 
+// returns a byte slice around the actual struct data!
+func unsafeBytes(fileInfo *FileInformation) []byte {
+	ptr := unsafe.Pointer(&fileInfo)
+	size := unsafe.Sizeof(fileInfo)
+	bytes := (*[1 << 31]byte)(ptr)[:size:size]
+	return bytes
+}
+
 func serialize(fileInfo FileInformation) string {
-	buffer := new(bytes.Buffer)
-	enc := gob.NewEncoder(buffer)
-	err := enc.Encode(fileInfo)
-	if err != nil {
-		log.Fatalf("Could not encode file information: %v", err)
-	}
-	return base64.StdEncoding.EncodeToString(buffer.Bytes())
+	//	ptr := unsafe.Pointer(&fileInfo)a
+	//	size := unsafe.Sizeof(fileInfo)
+	//	bytes := (*[1<<31]byte)(ptr)[:size:size]
+	//return base64.StdEncoding.EncodeToString(unsafeBytes(&fileInfo))
+	return base64.StdEncoding.EncodeToString(binary.unsafeBytes(&fileInfo))
 }
 
 func deserialize(line string) (*FileInformation, error) {
@@ -107,14 +112,18 @@ func deserialize(line string) (*FileInformation, error) {
 	if err != nil {
 		return nil, err
 	}
-	buffer := bytes.NewReader(data)
-	dec := gob.NewDecoder(buffer)
-	fileInfo := new(FileInformation)
-	err = dec.Decode(fileInfo)
-	if err != nil {
-		return nil, err
-	}
-	return fileInfo, nil
+	var fileInfo FileInformation
+	bytes := unsafeBytes(&fileInfo)
+	copy(bytes, data)
+	// TODO Perform some senity checks before and/or after parsing
+	//	buffer := bytes.NewReader(data)
+	//	dec := gob.NewDecoder(buffer)
+	//	fileInfo := new(FileInformation)
+	//	err = dec.Decode(fileInfo)
+	//	if err != nil {
+	//		return nil, err
+	//	}
+	return &fileInfo, nil
 }
 
 func writeFileInfo(prefix string, fileInfo FileInformation, outfile *bufio.Writer) {
