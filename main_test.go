@@ -4,39 +4,45 @@ import (
 	"testing"
 )
 
-
-struct MockFileSystem {
+type MockFileSystem struct {
+	next uint64
 }
 
-struct MockFragment { }
+type MockFragment struct {
+	data   string
+	start  uint64
+	length uint64
+}
+
+type MockFile struct {
+	fragments []MockFragment
+}
 
 // creates a new fragment on the virtual disk with the characters of the given string
 // representing the contents of the block. The fragment is not adjacent to any other
 // fragment.
-func (fs *FileSystem) fragment(data string) MockFragment {
-	return MockFragment
+func (fs *MockFileSystem) fragment(data string) MockFragment {
+	fragment := MockFragment{data: data, start: fs.next, length: uint64(len(data))}
+	fs.next = fragment.start + fragment.length + 1
+	return fragment
 }
 
-TestSubmitForDefrag(t *testing.T) {
-	var fs FileSystem
+func (fs *MockFileSystem) file(frags ...MockFragment) MockFile {
+	return MockFile{fragments: frags}
+}
+
+func assertDefragResult(defraggedSize uint64, files ...MockFile) {
+	// TODO implement assertion
+}
+
+func TestSubmitForDefrag(t *testing.T) {
+	var fs MockFileSystem
 
 	a1 := fs.fragment("abc")
-	b1 := fs.fragment("def")
-	c1 := fs.fragment("ghi")
-	d1 := fs.fragment("jkl")
-	e1 := fs.fragment("mno")
-	f1 := fs.fragment("pqr")
-	g1 := fs.fragment("stu")
-	h1 := fs.fragment("vwx")
-
 	a2 := fs.fragment("abc")
-	
-	f1 := "ABC.DEF.GHI.JKL"
-	l1 := "000011112222333"
-	f2 := "ABC.DEF.MNO"
-	l2 := "44441111555"
-	f3 := "ABC.PQR.STU"
-	l3 := "00006666777"
-	f4 := "ABC.PQR.VWX"
-	l4 := "44447777888"
+
+	f1 := fs.file(a1)
+	f2 := fs.file(a2)
+
+	assertDefragResult(3, f1, f2)
 }

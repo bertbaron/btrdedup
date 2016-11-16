@@ -165,14 +165,14 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		filenames[i] = pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
