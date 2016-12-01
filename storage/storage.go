@@ -2,10 +2,8 @@ package storage
 
 import (
 	"github.com/bertbaron/btrdedup/sys"
-	"gopkg.in/cheggaaa/pb.v1"
-	"log"
 	"path/filepath"
-	"time"
+	"sync"
 )
 
 const (
@@ -53,6 +51,7 @@ type DedupInterface interface {
 // number, because we are in the end only interested in files, not in directories
 // Note that this interface is a bit tricky because the caller always need to know if he deals with a directory or a file.
 // It shouldn't cost too much to improve this...
+// Access is thread-safe as long as it is not modified during iteration by ProcessFiles
 type PathStorage interface {
 	// Adds the given path. Use parent -1 to add a root. Panics if the parent does not exist
 	AddDir(parent int32, name string) int32
@@ -66,21 +65,23 @@ type PathStorage interface {
 	// Returns the path of the directory for the given number. Panics if it doesn't exist
 	DirPath(number int32) string
 
-	// Passes all the file names (not the dir names) to the consumer function
-	ProcessFiles(consumer func(filenr int32, filename string))
-
 	// Returns the number of files (not dirs)
 	FileCount() int
+
+	// Passes all the file names (not the dir names) to the consumer function.
+	// NOTE: During iteration no files or directories should be added
+	ProcessFiles(consumer func(filenr int32, filename string))
 }
 
 type pathnode struct {
 	// parent, -1 if there is no parent
 	parent int32
 	// name of this file or directory
-	name string
+	name   string
 }
 
 type pathstore struct {
+	lock   sync.RWMutex
 	// in-trees
 	dirs  []pathnode
 	files []pathnode
@@ -91,6 +92,9 @@ func NewPathStorage() PathStorage {
 }
 
 func (store *pathstore) AddDir(parent int32, name string) int32 {
+	store.lock.Lock()
+	defer store.lock.Unlock()
+
 	if parent != -1 {
 		_ = store.dirs[parent] // issues panic if parent does not exist, we may want to do this more explicitly
 	}
@@ -99,6 +103,9 @@ func (store *pathstore) AddDir(parent int32, name string) int32 {
 }
 
 func (store *pathstore) AddFile(parent int32, name string) int32 {
+	store.lock.Lock()
+	defer store.lock.Unlock()
+
 	if parent != -1 {
 		_ = store.dirs[parent] // issues panic if parent does not exist, we may want to do this more explicitly
 	}
@@ -107,6 +114,9 @@ func (store *pathstore) AddFile(parent int32, name string) int32 {
 }
 
 func (store *pathstore) DirPath(number int32) string {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	path := &store.dirs[number]
 	if path.parent == -1 {
 		return path.name
@@ -115,6 +125,9 @@ func (store *pathstore) DirPath(number int32) string {
 }
 
 func (store *pathstore) FilePath(number int32) string {
+	store.lock.RLock()
+	defer store.lock.RUnlock()
+
 	path := &store.files[number]
 	if path.parent == -1 {
 		return path.name
@@ -123,119 +136,16 @@ func (store *pathstore) FilePath(number int32) string {
 }
 
 func (store *pathstore) ProcessFiles(consumer func(filenr int32, filename string)) {
-	for filenr, _ := range store.files {
-		consumer(int32(filenr), store.FilePath(int32(filenr)))
+	// Is the following necessary and sufficient to ensure memory visibility?
+	store.lock.RLock()
+	s := store
+	store.lock.RUnlock()
+
+	for filenr, _ := range s.files {
+		consumer(int32(filenr), s.FilePath(int32(filenr)))
 	}
 }
 
 func (store *pathstore) FileCount() int {
 	return len(store.files)
-}
-
-type progressBar interface {
-	Add(count int) int
-	Finish()
-}
-
-func newConsoleProgressBar(count int) progressBar {
-	bar := pb.StartNew(count)
-	bar.SetRefreshRate(time.Second)
-	return bar
-}
-
-type logProgressBar struct {
-	total      int
-	count      int
-	lastLogged int
-}
-
-func (b *logProgressBar) Add(count int) int {
-	b.count += count
-	if b.total > 0 {
-		percentage := b.count * 100 / b.total
-		if percentage > b.lastLogged {
-			log.Printf("Progress: %d (%d/%d)", percentage, b.count, b.total)
-			b.lastLogged = percentage
-		}
-	}
-	return b.count
-}
-
-func (b *logProgressBar) Finish() {
-	// TODO
-}
-
-func newLogProgressBar(count int) progressBar {
-	return &logProgressBar{total: count}
-}
-
-type Statistics struct {
-	fileCount  int
-	filesFound int
-	hashTot    int
-
-	showPb   bool
-	progress progressBar
-	passName string
-	start    time.Time
-}
-
-func NewProgressBarStats() *Statistics {
-	return &Statistics{showPb: true}
-}
-
-func NewProgressLogStats() *Statistics {
-	return &Statistics{showPb: false}
-}
-
-func (s *Statistics) startProgress(name string, count int) {
-	s.passName = name
-	s.start = time.Now()
-	s.progress = newLogProgressBar(count)
-	if s.showPb {
-		s.progress = newConsoleProgressBar(count)
-	}
-}
-
-func (s *Statistics) updateProgress(count int) {
-	s.progress.Add(count)
-}
-
-func (s *Statistics) StopProgress() {
-	duration := time.Since(s.start)
-	s.progress.Finish()
-	log.Printf("Pass %s completed in %s", s.passName, duration)
-}
-
-func (s *Statistics) SetFileCount(count int) {
-	s.fileCount = count
-}
-
-func (s *Statistics) StartFileinfoProgress() {
-	s.startProgress("Collecting file information", s.fileCount)
-}
-
-func (s *Statistics) FileInfoRead() {
-	s.updateProgress(1)
-}
-
-func (s *Statistics) FileAdded() {
-	s.filesFound += 1
-}
-
-func (s *Statistics) HashesCalculated(count int) {
-	s.hashTot += count
-	s.updateProgress(count)
-}
-
-func (s *Statistics) Deduplicating(count int) {
-	s.updateProgress(count)
-}
-
-func (s *Statistics) StartHashProgress() {
-	s.startProgress("Calculating hashes for first block of each file", s.filesFound)
-}
-
-func (s *Statistics) StartDedupProgress() {
-	s.startProgress("Deduplication", s.hashTot)
 }
