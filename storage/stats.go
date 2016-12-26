@@ -57,11 +57,11 @@ type Statistics struct {
 }
 
 func NewProgressBarStats() *Statistics {
-	return &Statistics{showPb: true, channel: make(chan func(*Statistics), 2000)}
+	return &Statistics{showPb: true, channel: make(chan func(*Statistics), 10)}
 }
 
 func NewProgressLogStats() *Statistics {
-	return &Statistics{showPb: false, channel: make(chan func(*Statistics), 2000)}
+	return &Statistics{showPb: false, channel: make(chan func(*Statistics), 10)}
 }
 
 func process(s *Statistics) {
