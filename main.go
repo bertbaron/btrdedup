@@ -272,6 +272,7 @@ func main() {
 	if !*nopb && terminal.IsTerminal(int(os.Stdout.Fd())) {
 		stats = storage.NewProgressBarStats()
 	}
+	stats.Start()
 
 	filenames := flag.Args()
 
@@ -303,5 +304,6 @@ func main() {
 
 	writeHeapProfile(*memprofile, "_pass1")
 
+	stats.Stop()
 	fmt.Println("Done")
 }

@@ -4,6 +4,7 @@ import (
 	"gopkg.in/cheggaaa/pb.v1"
 	"time"
 	"log"
+	"fmt"
 )
 
 type progressBar interface {
@@ -48,18 +49,40 @@ type Statistics struct {
 	filesFound int
 	hashTot    int
 
-	showPb   bool
-	progress progressBar
-	passName string
-	start    time.Time
+	showPb     bool
+	progress   progressBar
+	passName   string
+	start      time.Time
+	channel    chan func(*Statistics)
 }
 
 func NewProgressBarStats() *Statistics {
-	return &Statistics{showPb: true}
+	return &Statistics{showPb: true, channel: make(chan func(*Statistics), 2000)}
 }
 
 func NewProgressLogStats() *Statistics {
-	return &Statistics{showPb: false}
+	return &Statistics{showPb: false, channel: make(chan func(*Statistics), 2000)}
+}
+
+func process(s *Statistics) {
+	i := 0
+	for f := range s.channel {
+		f(s)
+		i += 1
+	}
+}
+
+func (s *Statistics) Start() {
+	go process(s)
+}
+
+func (s *Statistics) Stop() {
+	c := make(chan int)
+	s.channel <- func(*Statistics) {
+		c <- 1
+	}
+	close(s.channel)
+	<-c
 }
 
 func (s *Statistics) startProgress(name string, count int) {
@@ -76,40 +99,64 @@ func (s *Statistics) updateProgress(count int) {
 }
 
 func (s *Statistics) StopProgress() {
-	duration := time.Since(s.start)
-	s.progress.Finish()
-	log.Printf("Pass %s completed in %s", s.passName, duration)
+	s.channel <- func(s *Statistics) {
+		duration := time.Since(s.start)
+		s.progress.Finish()
+		log.Printf("Pass %s completed in %s", s.passName, duration)
+	}
 }
 
 func (s *Statistics) SetFileCount(count int) {
-	s.fileCount = count
+	s.channel <- func(s *Statistics) {
+		s.fileCount = count
+	}
 }
 
 func (s *Statistics) StartFileinfoProgress() {
-	s.startProgress("Collecting file information", s.fileCount)
+	s.channel <- func(s *Statistics) {
+		s.startProgress("Collecting file information", s.fileCount)
+	}
 }
 
 func (s *Statistics) FileInfoRead() {
-	s.updateProgress(1)
+	s.channel <- func(s *Statistics) {
+		s.updateProgress(1)
+	}
 }
 
 func (s *Statistics) FileAdded() {
-	s.filesFound += 1
+	s.channel <- func(s *Statistics) {
+		s.filesFound += 1
+	}
 }
 
 func (s *Statistics) HashesCalculated(count int) {
-	s.hashTot += count
-	s.updateProgress(count)
+	s.channel <- func(s *Statistics) {
+		s.hashTot += count
+		s.updateProgress(count)
+	}
 }
 
 func (s *Statistics) Deduplicating(count int) {
-	s.updateProgress(count)
+	s.channel <- func(s *Statistics) {
+		s.updateProgress(count)
+	}
 }
 
 func (s *Statistics) StartHashProgress() {
-	s.startProgress("Calculating hashes for first block of each file", s.filesFound)
+	s.channel <- func(s *Statistics) {
+		s.startProgress("Calculating hashes for first block of each file", s.filesFound)
+	}
 }
 
 func (s *Statistics) StartDedupProgress() {
-	s.startProgress("Deduplication", s.hashTot)
+	s.channel <- func(s *Statistics) {
+		s.startProgress("Deduplication", s.hashTot)
+	}
+}
+
+func (s *Statistics) Print() {
+	s.channel <- func(s *Statistics) {
+		fmt.Printf("** Statistics: %+v\n", s)
+	}
 }
