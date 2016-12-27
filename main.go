@@ -143,7 +143,7 @@ func loadFileInformation(ctx context) {
 	})
 }
 
-// Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
+// Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
 func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
 	ctx.stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
 	if len(files) < 2 || files[0].Error {
