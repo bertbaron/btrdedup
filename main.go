@@ -20,8 +20,11 @@ const (
 	minSize int64 = 4 * 1024
 )
 
-var pathstore = storage.NewPathStorage()
-var stats *storage.Statistics
+type context struct {
+	pathstore storage.PathStorage
+	stats *storage.Statistics
+	state storage.DedupInterface
+}
 
 // readDirNames reads the directory named by dirname
 func readDirNames(dirname string) ([]string, error) {
@@ -73,9 +76,9 @@ func readChecksum(path string) (*[16]byte, error) {
 
 // Updates the file information with checksum. Returns true if successful, false otherwise
 // PRE: all files start at the same offset and files is not empty
-func createChecksums(files []*storage.FileInformation, state storage.DedupInterface) bool {
+func createChecksums(ctx context, files []*storage.FileInformation) bool {
 	pathnr := files[0].Path
-	path := pathstore.FilePath(pathnr)
+	path := ctx.pathstore.FilePath(pathnr)
 	csum, err := readChecksum(path)
 	if err != nil {
 		log.Printf("Error creating checksum for first block of file %s, %v", path, err)
@@ -84,17 +87,17 @@ func createChecksums(files []*storage.FileInformation, state storage.DedupInterf
 		}
 		return false
 	}
-	stats.HashesCalculated(len(files))
+	ctx.stats.HashesCalculated(len(files))
 	for _, file := range files {
 		file.Csum = *csum
 	}
 	return true
 }
 
-func collectFiles(parent int32, name string) {
+func collectFiles(ctx context, parent int32, name string) {
 	path := name
 	if parent >= 0 {
-		path = filepath.Join(pathstore.DirPath(parent), name)
+		path = filepath.Join(ctx.pathstore.DirPath(parent), name)
 	}
 
 	fi, err := os.Lstat(path)
@@ -114,35 +117,35 @@ func collectFiles(parent int32, name string) {
 			log.Printf("Error while reading the contents of directory %s: %v", path, err)
 			return
 		}
-		pathnr := pathstore.AddDir(parent, name)
+		pathnr := ctx.pathstore.AddDir(parent, name)
 		for _, e := range elements {
-			collectFiles(pathnr, e)
+			collectFiles(ctx, pathnr, e)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
 		if size > minSize {
-			pathstore.AddFile(parent, name)
+			ctx.pathstore.AddFile(parent, name)
 		}
 	}
 }
 
-func loadFileInformation(state storage.DedupInterface) {
-	pathstore.ProcessFiles(func(filenr int32, path string) {
-		defer stats.FileInfoRead()
+func loadFileInformation(ctx context) {
+	ctx.pathstore.ProcessFiles(func(filenr int32, path string) {
+		defer ctx.stats.FileInfoRead()
 		fileInformation, err := readFileMeta(filenr, path)
 		if err != nil {
 			log.Printf("Error while trying to get the fragments of file %s: %v", path, err)
 			return
 		}
-		stats.FileAdded()
-		state.AddFile(*fileInformation)
+		ctx.stats.FileAdded()
+		ctx.state.AddFile(*fileInformation)
 
 	})
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense the will actually be deduplicated
-func submitForDedup(files []*storage.FileInformation, noact bool) {
-	stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
+func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
+	ctx.stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
 	if len(files) < 2 || files[0].Error {
 		return
 	}
@@ -162,7 +165,7 @@ func submitForDedup(files []*storage.FileInformation, noact bool) {
 		if file.PhysicalOffset() != physicalOffset {
 			sameOffset = false
 		}
-		filenames[i] = pathstore.FilePath(file.Path)
+		filenames[i] = ctx.pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
@@ -198,42 +201,42 @@ func updateOpenFileLimit() {
 	}
 }
 
-func collectApplicableFiles(filenames []string) {
+func collectApplicableFiles(ctx context, filenames []string) {
 	fmt.Printf("Searching for applicable files\n")
 	for _, filename := range filenames {
-		collectFiles(-1, filename)
+		collectFiles(ctx, -1, filename)
 	}
 }
 
-func pass1(filenames []string, state storage.DedupInterface) {
+func pass1(ctx context, filenames []string) {
 	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
-	state.StartPass1()
-	stats.StartFileinfoProgress()
-	loadFileInformation(state)
-	stats.StopProgress()
-	state.EndPass1()
+	ctx.state.StartPass1()
+	ctx.stats.StartFileinfoProgress()
+	loadFileInformation(ctx)
+	ctx.stats.StopProgress()
+	ctx.state.EndPass1()
 }
 
-func pass2(state storage.DedupInterface) {
+func pass2(ctx context) {
 	fmt.Printf("Pass 2 of 3, calculating hashes for first block of files\n")
-	state.StartPass2()
-	stats.StartHashProgress()
-	state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
-		return createChecksums(files, state)
+	ctx.state.StartPass2()
+	ctx.stats.StartHashProgress()
+	ctx.state.PartitionOnOffset(func(files []*storage.FileInformation) bool {
+		return createChecksums(ctx, files)
 	})
-	stats.StopProgress()
-	state.EndPass2()
+	ctx.stats.StopProgress()
+	ctx.state.EndPass2()
 }
 
-func pass3(state storage.DedupInterface, noact bool) {
+func pass3(ctx context, noact bool) {
 	fmt.Printf("Pass 3 of 3, deduplucating files\n")
-	state.StartPass3()
-	stats.StartDedupProgress()
-	state.PartitionOnHash(func(files []*storage.FileInformation) {
-		submitForDedup(files, noact)
+	ctx.state.StartPass3()
+	ctx.stats.StartDedupProgress()
+	ctx.state.PartitionOnHash(func(files []*storage.FileInformation) {
+		submitForDedup(ctx, files, noact)
 	})
-	stats.StopProgress()
-	state.EndPass3()
+	ctx.stats.StopProgress()
+	ctx.state.EndPass3()
 }
 
 func writeHeapProfile(basename string, suffix string) {
@@ -268,11 +271,15 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	stats = storage.NewProgressLogStats()
+	var ctx context
+
+	ctx.pathstore = storage.NewPathStorage()
+
+	ctx.stats = storage.NewProgressLogStats()
 	if !*nopb && terminal.IsTerminal(int(os.Stdout.Fd())) {
-		stats = storage.NewProgressBarStats()
+		ctx.stats = storage.NewProgressBarStats()
 	}
-	stats.Start()
+	ctx.stats.Start()
 
 	filenames := flag.Args()
 
@@ -283,27 +290,27 @@ func main() {
 
 	updateOpenFileLimit()
 
-	var state storage.DedupInterface = storage.NewMemoryBased()
+	ctx.state = storage.NewMemoryBased()
 	if *lowmem {
 		log.Printf("Running in low memory mode")
-		state = storage.NewFileBased()
+		ctx.state = storage.NewFileBased()
 	}
 
-	collectApplicableFiles(filenames)
-	stats.SetFileCount(pathstore.FileCount())
+	collectApplicableFiles(ctx, filenames)
+	ctx.stats.SetFileCount(ctx.pathstore.FileCount())
 
-	pass1(filenames, state)
-
-	writeHeapProfile(*memprofile, "_pass1")
-
-	pass2(state)
+	pass1(ctx, filenames)
 
 	writeHeapProfile(*memprofile, "_pass1")
 
-	pass3(state, *noact)
+	pass2(ctx)
 
 	writeHeapProfile(*memprofile, "_pass1")
 
-	stats.Stop()
+	pass3(ctx, *noact)
+
+	writeHeapProfile(*memprofile, "_pass1")
+
+	ctx.stats.Stop()
 	fmt.Println("Done")
 }
