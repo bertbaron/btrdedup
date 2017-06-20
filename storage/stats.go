@@ -29,7 +29,7 @@ func (b *logProgressBar) Add(count int) int {
 	if b.total > 0 {
 		percentage := b.count * 100 / b.total
 		if percentage > b.lastLogged {
-			log.Printf("Progress: %d (%d/%d)", percentage, b.count, b.total)
+			log.Printf("Progress: %d%% (%d/%d)", percentage, b.count, b.total)
 			b.lastLogged = percentage
 		}
 	}
