@@ -1,7 +1,5 @@
 # BTRFS Deduplication tool
 
-[![release](http://github-release-version.herokuapp.com/github/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
-
 Deduplication tool like [bedup](https://github.com/g2p/bedup). I wrote it quite some time ago
  already because bedup had problems with my volume and the number of snapshots (crashes, database corruption etc.)
 
@@ -13,10 +11,26 @@ Btrdedup does not maintain state between runs. This makes it less suitable for i
  hand it makes the tool very robust and because of its efficiency in detecting already deduplicated files it can easily
  be scheduled to run once a month for example.
 
+# Installation
+
+Download the latest release:
+
+[![release](http://github-release-version.herokuapp.com/github/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
+
+Make executable using: ```chmod +x btrdedup```
+
+# Usage
+
 Typically you want to run the program as root on the complete mounted btrfs pool with a command like this:
 
 ```shell
-nice -n 10 ./btrdedup /mnt 2>dedup.log &
+nice -n 10 ./btrdedup /mnt 2>dedup.log
+```
+
+or
+
+```shell
+nice -n 10 ./btrdedup /mnt >dedup.out 2>dedup.log &
 ```
 
 The scanning phase may still take a long time depending on the number of files. The most expensive part however,
