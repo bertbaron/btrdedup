@@ -20,10 +20,15 @@ const (
 	minSize int64 = 4 * 1024
 )
 
+var (
+	version   = "undefined"
+	buildTime = "unknown"
+)
+
 type context struct {
 	pathstore storage.PathStorage
-	stats *storage.Statistics
-	state storage.DedupInterface
+	stats     *storage.Statistics
+	state     storage.DedupInterface
 }
 
 // readDirNames reads the directory named by dirname
@@ -168,14 +173,14 @@ func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
 		filenames[i] = ctx.pathstore.FilePath(file.Path)
 	}
 	if sameOffset {
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files)-1)
+		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
 	}
 }
 
@@ -255,12 +260,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTION]... [FILE-OR-DIR]...\n", os.Args[0])
 		flag.PrintDefaults()
 	}
+	showVersion := flag.Bool("version", false, "show version information and exits")
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
 	lowmem := flag.Bool("lowmem", false, "if provided, the tool will use much less memory by using temporary files and the external sort command")
 	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("btrdedup version '%s' built at '%s'\n", version, buildTime)
+		return
+	}
 
 	if *cpuprofile != "" {
 		f, err := os.Create((*cpuprofile) + ".prof")
