@@ -1,5 +1,7 @@
 # BTRFS Deduplication tool
 
+[![release](http://github-release-version.herokuapp.com/github/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
+
 Deduplication tool like [bedup](https://github.com/g2p/bedup). I wrote it quite some time ago
  already because bedup had problems with my volume and the number of snapshots (crashes, database corruption etc.)
 
