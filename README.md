@@ -58,9 +58,12 @@ Btrdedup works by first reading the file tree(s) in memory in an efficient data 
 
  * Pass 3: Files that have the first block in common are offered for deduplication. The deduplication phase will
    first check if blocks are already shared to only offer data for actual deduplication if necessary. 
-  
-The last pass is still to be improved. Currently only the prefixes of files are deduplicated. As soon as blocks of files
- differ the deduplication assumes the remainder of the files doesn't share blocks. 
-  
+
 In lowmem mode, the output of each pass is written to an encoded temporary text file which is then sorted using the
  systems `sort` tool.
+
+# Future improvements
+
+The last pass still needs some improvents. Currently files with the same hashcode for the first block are assumed to be
+equal to the size of the smallest file. In the future the blocks should be more thoroughly checked for duplicates, by
+comparing the hash codes of all blocks.
