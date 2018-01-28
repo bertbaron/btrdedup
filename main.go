@@ -82,6 +82,7 @@ func readChecksum(path string) (*[16]byte, error) {
 // Updates the file information with checksum. Returns true if successful, false otherwise
 // PRE: all files start at the same offset and files is not empty
 func createChecksums(ctx context, files []*storage.FileInformation) bool {
+	defer ctx.stats.HashesCalculated(len(files))
 	pathnr := files[0].Path
 	path := ctx.pathstore.FilePath(pathnr)
 	csum, err := readChecksum(path)
@@ -92,7 +93,6 @@ func createChecksums(ctx context, files []*storage.FileInformation) bool {
 		}
 		return false
 	}
-	ctx.stats.HashesCalculated(len(files))
 	for _, file := range files {
 		file.Csum = *csum
 	}
@@ -150,7 +150,7 @@ func loadFileInformation(ctx context) {
 
 // Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
 func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
-	ctx.stats.Deduplicating(len(files)) // TODO We should update progress bar on any return...
+	defer ctx.stats.Deduplicating(len(files))
 	if len(files) < 2 || files[0].Error {
 		return
 	}
