@@ -95,7 +95,10 @@ func BtrfsExtendSame(same []BtrfsSameExtendInfo, length uint64) ([]BtrfsSameResu
 		log.Fatalf("Assertion error, there should be at least two files to deduplicate, found: %v", same)
 	}
 	if len(same) > maxFileCount {
-		log.Fatalf("Deduplication is currently supported for at most %d files, but was %d", maxFileCount, len(same))
+		for i, file := range same {
+			log.Printf("DEBUG: poptential dup %d: %s", i, file.File.Name())
+		}
+		return nil, fmt.Errorf("Deduplication is currently supported for at most %d files, but was %d", maxFileCount, len(same))
 	}
 
 	args := makeSameRequest(same, length)
