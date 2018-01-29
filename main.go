@@ -53,6 +53,9 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
+	if len(fragments) > 100 {
+		log.Printf("DEBUG: file %s has %d fragments", path, len(fragments))
+	}
 	return &storage.FileInformation{Path: pathnr, Fragments: fragments}, nil
 }
 
