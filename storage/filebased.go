@@ -187,6 +187,7 @@ func partitionFile(fileName string, prefixIsHash bool, receiver func([]*FileInfo
 	}
 	defer infile.Close()
 	scanner := bufio.NewScanner(infile)
+	scanner.Buffer(make([]byte, 4096), 10*1024*1024)
 	lastPrefix := ""
 	files := make([]*FileInformation, 0)
 	for scanner.Scan() {
@@ -211,6 +212,9 @@ func partitionFile(fileName string, prefixIsHash bool, receiver func([]*FileInfo
 			lastPrefix = prefix
 		}
 		files = append(files, fileInfo)
+	}
+	if err:=scanner.Err(); err != nil {
+		log.Fatalf("Failed to parse %s, %v", fileName, err)
 	}
 	if len(files) != 0 {
 		receiver(files)
