@@ -8,9 +8,11 @@ import (
 	"github.com/bertbaron/btrdedup/sys"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/ssh/terminal"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/pprof"
 	"syscall"
@@ -52,9 +54,6 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	fragments, err := sys.Fragments(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
-	}
-	if len(fragments) > 100 {
-		log.Printf("DEBUG: file %s has %d fragments", path, len(fragments))
 	}
 	return &storage.FileInformation{Path: pathnr, Fragments: fragments}, nil
 }
@@ -154,6 +153,35 @@ func loadFileInformation(ctx context) {
 // Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
 func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
 	defer ctx.stats.Deduplicating(len(files))
+
+	defragged := false
+	fragcount := len(files[0].Fragments)
+	if fragcount > 100 {
+		path := ctx.pathstore.FilePath(files[0].Path)
+		log.Printf("File %s has %d fragments, we defragment it before deduplication", path, fragcount)
+		command := exec.Command("btrfs", "filesystem", "defragment", "-f", path)
+		stderr, err := command.StderrPipe()
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := command.Start(); err != nil {
+			log.Printf("Defragmentation of %s failed to start: %v", path, err)
+		} else {
+			errorOutput, _ := ioutil.ReadAll(stderr)
+			if err := command.Wait(); err != nil {
+				log.Printf("Defragmentation of %s failed: %v", path, err)
+				log.Printf("Defragmentation error output: %s", errorOutput)
+			}
+			defragged = true // even if defragmentation failed, the file might be (partly) defragmented
+			if newFile, err := readFileMeta(files[0].Path, path); err != nil {
+				log.Printf("Error while reading the fragmentation table again: %v", err)
+			} else {
+				files[0] = newFile
+				log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
+			}
+		}
+	}
+
 	if len(files) < 2 || files[0].Error {
 		return
 	}
@@ -175,7 +203,7 @@ func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
 		}
 		filenames[i] = ctx.pathstore.FilePath(file.Path)
 	}
-	if sameOffset {
+	if !defragged && sameOffset { // when a file is defragmented we always need to deduplicate because deduplication breaks extend sharing
 		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
 		return
 	}
