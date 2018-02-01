@@ -56,7 +56,7 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
 	for idx, frag := range fragments[1:] {
-		if fragments[idx-1].Start + fragments[idx-1].Length == frag.Start {
+		if fragments[idx].Start + fragments[idx].Length == frag.Start {
 			log.Printf("Contignues fragments found in file: %s", path)
 			break
 		}
