@@ -56,8 +56,8 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
 	for idx, frag := range fragments[1:] {
-		if fragments[idx].Start + fragments[idx].Length == frag.Start {
-			log.Printf("Contignues fragments found in file: %s", path)
+		if fragments[idx].Start+fragments[idx].Length == frag.Start {
+			log.Printf("Contignues fragments found at extend %d in file: %s", idx+1, path)
 			break
 		}
 	}
@@ -228,7 +228,7 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 // Returns true if the files share the same data until the given size
 // currently not most efficient (n^2 in number of blocks), could be improved in the future
 func isShared(files []*storage.FileInformation, size int64) bool {
-	for i := int64(0); i<size/4096; i++ {
+	for i := int64(0); i < size/4096; i++ {
 		offset := files[0].PhysicalOffsetAt(i)
 		for _, file := range files[1:] {
 			if file.PhysicalOffsetAt(i) != offset {
