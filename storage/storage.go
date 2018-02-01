@@ -4,6 +4,8 @@ import (
 	"github.com/bertbaron/btrdedup/sys"
 	"path/filepath"
 	"sync"
+	"golang.org/x/sys/unix"
+	"log"
 )
 
 const (
@@ -22,12 +24,30 @@ func (f *FileInformation) PhysicalOffset() uint64 {
 	return f.Fragments[0].Start
 }
 
+// Pre: 0 <= i < file size
+func (information *FileInformation) PhysicalOffsetAt(i int64) uint64 {
+	remaining := uint64(i)
+	for _, frag := range information.Fragments {
+		if remaining < frag.Length {
+			return frag.Start + remaining
+		}
+		remaining = remaining - frag.Length
+	}
+	// TODO Handle this in a nicer way
+	log.Fatalf("Offset %d is beyond file size", i)
+	return 0 // will never be reached
+}
+
 func (f *FileInformation) Size() int64 {
 	size := int64(0)
 	for _, frag := range f.Fragments {
 		size += int64(frag.Length)
 	}
 	return size
+}
+
+func (f *FileInformation) Writable(pathstore PathStorage) bool {
+	return unix.Access(pathstore.FilePath(f.Path), unix.W_OK) == nil
 }
 
 type DedupInterface interface {

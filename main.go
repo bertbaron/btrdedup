@@ -55,6 +55,12 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
+	for idx, frag := range fragments[1:] {
+		if fragments[idx-1].Start + fragments[idx-1].Length == frag.Start {
+			log.Printf("Contignues fragments found in file: %s", path)
+			break
+		}
+	}
 	return &storage.FileInformation{Path: pathnr, Fragments: fragments}, nil
 }
 
@@ -150,36 +156,96 @@ func loadFileInformation(ctx context) {
 	})
 }
 
+// Currently we always deduplicate towards the first file. Therefore we place the least-defragmented file in first
+// position and, if the fragmentation is higher than the threshold, defragment it first.
+//
+// Note that when we will do the deduplication more clever (comparing all blocks of all files), we may also need to do
+// the defragmentation in a more clever way.
+func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, defragThreshold int, noact bool) bool {
+	// least-fragmented file first
+	for idx, file := range files {
+		if len(file.Fragments) < len(files[0].Fragments) {
+			files[0], files[idx] = files[idx], files[0]
+		}
+	}
+
+	fragcount := len(files[0].Fragments)
+	if defragThreshold < 1 || fragcount < defragThreshold {
+		return false
+	}
+
+	// Non-writable files (i.e. from read-only snapshots) can not be defragmented, so find a writable file
+	writableFound := false
+	for idx, file := range files {
+		if file.Writable(ctx.pathstore) {
+			files[0], files[idx] = files[idx], files[0]
+			writableFound = true
+			break;
+		}
+	}
+
+	file := files[0]
+	path := ctx.pathstore.FilePath(file.Path)
+
+	if !writableFound {
+		log.Printf("File %s can not be defragmented, none of the duplicates are writable", path)
+		return false
+	}
+
+	fragcount = len(file.Fragments)
+
+	if noact {
+		log.Printf("File %s has %d fragments, but will not be defragmented because -noact option is specified", path, fragcount)
+	}
+
+	log.Printf("File %s has %d fragments, we defragment it before deduplication", path, fragcount)
+	command := exec.Command("btrfs", "filesystem", "defragment", "-f", path)
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		log.Printf("Defragmentation of %s failed to start: %v", path, err)
+		return false
+	}
+
+	errorOutput, _ := ioutil.ReadAll(stderr)
+	if err := command.Wait(); err != nil {
+		log.Printf("Defragmentation of %s failed: %v", path, err)
+		log.Printf("Defragmentation error output: %s", errorOutput)
+		return true // even if defragmentation failed, the file might be (partly) defragmented
+	}
+
+	if newFile, err := readFileMeta(file.Path, path); err != nil {
+		log.Printf("Error while reading the fragmentation table again: %v", err)
+	} else {
+		files[0] = newFile
+		log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
+	}
+	return true
+}
+
+// Returns true if the files share the same data until the given size
+// currently not most efficient (n^2 in number of blocks), could be improved in the future
+func isShared(files []*storage.FileInformation, size int64) bool {
+	for i := int64(0); i<size/4096; i++ {
+		offset := files[0].PhysicalOffsetAt(i)
+		for _, file := range files[1:] {
+			if file.PhysicalOffsetAt(i) != offset {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
-func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
+func submitForDedup(ctx context, files []*storage.FileInformation, defragThreshold int, noact bool) {
 	defer ctx.stats.Deduplicating(len(files))
 
 	defragged := false
-	fragcount := len(files[0].Fragments)
-	if fragcount > 100 {
-		path := ctx.pathstore.FilePath(files[0].Path)
-		log.Printf("File %s has %d fragments, we defragment it before deduplication", path, fragcount)
-		command := exec.Command("btrfs", "filesystem", "defragment", "-f", path)
-		stderr, err := command.StderrPipe()
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := command.Start(); err != nil {
-			log.Printf("Defragmentation of %s failed to start: %v", path, err)
-		} else {
-			errorOutput, _ := ioutil.ReadAll(stderr)
-			if err := command.Wait(); err != nil {
-				log.Printf("Defragmentation of %s failed: %v", path, err)
-				log.Printf("Defragmentation error output: %s", errorOutput)
-			}
-			defragged = true // even if defragmentation failed, the file might be (partly) defragmented
-			if newFile, err := readFileMeta(files[0].Path, path); err != nil {
-				log.Printf("Error while reading the fragmentation table again: %v", err)
-			} else {
-				files[0] = newFile
-				log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
-			}
-		}
+	if !noact {
+		defragged = reorderAndDefragIfNeeded(ctx, files, defragThreshold, noact)
 	}
 
 	if len(files) < 2 || files[0].Error {
@@ -195,23 +261,24 @@ func submitForDedup(ctx context, files []*storage.FileInformation, noact bool) {
 	}
 
 	filenames := make([]string, len(files))
-	sameOffset := true
-	physicalOffset := files[0].PhysicalOffset()
+	//sameOffset := true
+	//physicalOffset := files[0].PhysicalOffset()
 	for i, file := range files {
-		if file.PhysicalOffset() != physicalOffset {
-			sameOffset = false
-		}
+		//if file.PhysicalOffset() != physicalOffset {
+		//	sameOffset = false
+		//}
 		filenames[i] = ctx.pathstore.FilePath(file.Path)
 	}
-	if !defragged && sameOffset { // when a file is defragmented we always need to deduplicate because deduplication breaks extend sharing
-		log.Printf("Skipping %s and %d other files, they all have the same physical offset", filenames[0], len(files) - 1)
+	alreadyShared := isShared(files, size)
+	if !defragged && alreadyShared { // when a file is defragmented we always need to deduplicate because deduplication breaks extend sharing
+		log.Printf("Skipping %s and %d other files, they are already shared", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 		Dedup(filenames, 0, uint64(size))
 	} else {
-		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files) - 1)
+		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
 }
 
@@ -264,12 +331,12 @@ func pass2(ctx context) {
 	ctx.state.EndPass2()
 }
 
-func pass3(ctx context, noact bool) {
+func pass3(ctx context, defragThreshold int, noact bool) {
 	fmt.Printf("Pass 3 of 3, deduplucating files\n")
 	ctx.state.StartPass3()
 	ctx.stats.StartDedupProgress()
 	ctx.state.PartitionOnHash(func(files []*storage.FileInformation) {
-		submitForDedup(ctx, files, noact)
+		submitForDedup(ctx, files, defragThreshold, noact)
 	})
 	ctx.stats.StopProgress()
 	ctx.state.EndPass3()
@@ -294,7 +361,8 @@ func main() {
 	showVersion := flag.Bool("version", false, "show version information and exits")
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
 	lowmem := flag.Bool("lowmem", false, "if provided, the tool will use much less memory by using temporary files and the external sort command")
-	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar")
+	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar even if a terminal is detected")
+	defragThreshold := flag.Int("defragthreshold", 0, "defragment files with more than this number of fragments. If 0 (default) no defragmentation will be performed")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
@@ -349,7 +417,7 @@ func main() {
 
 	writeHeapProfile(*memprofile, "_pass1")
 
-	pass3(ctx, *noact)
+	pass3(ctx, *defragThreshold, *noact)
 
 	writeHeapProfile(*memprofile, "_pass1")
 
