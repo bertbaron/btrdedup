@@ -156,12 +156,16 @@ func loadFileInformation(ctx context) {
 	})
 }
 
+func avgBlocksPerFragment(file *storage.FileInformation) int {
+	fragcount := len(file.Fragments)
+	return int((file.Size / int64(fragcount)) / blockSize)
+}
 // Currently we always deduplicate towards the first file. Therefore we place the least-defragmented file in first
 // position and, if the fragmentation is higher than the threshold, defragment it first.
 //
 // Note that when we will do the deduplication more clever (comparing all blocks of all files), we may also need to do
 // the defragmentation in a more clever way.
-func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, defragThreshold int, noact bool) bool {
+func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, maxBpf int, noact bool) bool {
 	// least-fragmented file first
 	for idx, file := range files {
 		if len(file.Fragments) < len(files[0].Fragments) {
@@ -169,8 +173,8 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 		}
 	}
 
-	fragcount := len(files[0].Fragments)
-	if defragThreshold < 1 || fragcount < defragThreshold {
+	bpf := avgBlocksPerFragment(files[0])
+	if maxBpf < 1 || bpf < maxBpf {
 		return false
 	}
 
@@ -192,14 +196,14 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 		return false
 	}
 
-	fragcount = len(file.Fragments)
+	bpf = avgBlocksPerFragment(file)
 
 	if noact {
-		log.Printf("File %s has %d fragments, but will not be defragmented because -noact option is specified", path, fragcount)
+		log.Printf("File %s has %d blocks per fragment, but will not be defragmented because -noact option is specified", path, bpf)
 		return false
 	}
 
-	log.Printf("File %s has %d fragments, we defragment it before deduplication", path, fragcount)
+	log.Printf("File %s has %d blocks per fragment, we defragment it before deduplication", path, bpf)
 	command := exec.Command("btrfs", "filesystem", "defragment", "-f", path)
 	stderr, err := command.StderrPipe()
 	if err != nil {
@@ -221,7 +225,7 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 		log.Printf("Error while reading the fragmentation table again: %v", err)
 	} else {
 		files[0] = newFile
-		log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
+		log.Printf("Number of blocks per fragment was %d and is now %d for file %s", bpf, avgBlocksPerFragment(newFile), path)
 	}
 	return true
 }
@@ -241,10 +245,10 @@ func unsharedStart(files []*storage.FileInformation, size int64) int64 {
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
-func submitForDedup(ctx context, files []*storage.FileInformation, defragThreshold int, noact bool) {
+func submitForDedup(ctx context, files []*storage.FileInformation, maxBpf int, noact bool) {
 	defer ctx.stats.Deduplicating(len(files))
 
-	reorderAndDefragIfNeeded(ctx, files, defragThreshold, noact)
+	reorderAndDefragIfNeeded(ctx, files, maxBpf, noact)
 
 	if len(files) < 2 || files[0].Error {
 		return
@@ -326,12 +330,12 @@ func pass2(ctx context) {
 	ctx.state.EndPass2()
 }
 
-func pass3(ctx context, defragThreshold int, noact bool) {
+func pass3(ctx context, maxBpf int, noact bool) {
 	fmt.Printf("Pass 3 of 3, deduplucating files\n")
 	ctx.state.StartPass3()
 	ctx.stats.StartDedupProgress()
 	ctx.state.PartitionOnHash(func(files []*storage.FileInformation) {
-		submitForDedup(ctx, files, defragThreshold, noact)
+		submitForDedup(ctx, files, maxBpf, noact)
 	})
 	ctx.stats.StopProgress()
 	ctx.state.EndPass3()
@@ -357,10 +361,15 @@ func main() {
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
 	lowmem := flag.Bool("lowmem", false, "if provided, the tool will use much less memory by using temporary files and the external sort command")
 	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar even if a terminal is detected")
-	defragThreshold := flag.Int("defragthreshold", 0, "defragment files with more than this number of fragments. If 0 (default) no defragmentation will be performed")
+	defrag := flag.Bool("defrag", false, "defragment files with more than the configured number of blocks per fragment")
+	bpf := flag.Int("pbf", 1024, "max average blocks per fragment, default=1024 (4MB)")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
+
+	if !*defrag {
+		*bpf = 0
+	}
 
 	if *showVersion {
 		fmt.Printf("btrdedup version '%s' built at '%s'\n", version, buildTime)
@@ -412,7 +421,7 @@ func main() {
 
 	writeHeapProfile(*memprofile, "_pass1")
 
-	pass3(ctx, *defragThreshold, *noact)
+	pass3(ctx, *bpf, *noact)
 
 	writeHeapProfile(*memprofile, "_pass1")
 
