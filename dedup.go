@@ -36,7 +36,7 @@ func dedup(filenames []string, offset, length uint64) bool {
 		}
 	}
 	log.Printf("Result for length %d: same=%v, deduped=%d\n", length, !dataDiffers, bytesDeduped)
-	return !dataDiffers && bytesDeduped > 0
+	return !dataDiffers 
 }
 
 // Returns true if deduplication was successfull
@@ -45,6 +45,7 @@ func Dedup(filenames []string, offset, length uint64) {
 
 	max := maxSize / uint64(len(filenames))
 	same := true
+	// continue until the data is different
 	for same && offset < size {
 		len := size - offset
 		if len > max {

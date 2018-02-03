@@ -124,6 +124,7 @@ func serialize(fileInfo FileInformation) string {
 	buf := new(bytes.Buffer)
 	writeInt(buf, int64(fileInfo.Path), 4)
 	writeInt(buf, bool2int(fileInfo.Error), 1)
+	writeInt(buf, fileInfo.Size, 8)
 	writeInt(buf, int64(len(fileInfo.Fragments)), 4)
 	for _, frag := range fileInfo.Fragments {
 		writeInt(buf, int64(frag.Start), 8)
@@ -152,6 +153,7 @@ func deserialize(line string) (fileInfo *FileInformation, err error) {
 	fileInfo = new(FileInformation)
 	fileInfo.Path = int32(readInt(buff, 4))
 	fileInfo.Error = readInt(buff, 1) != 0
+	fileInfo.Size = readInt(buff, 8)
 	frags := int(readInt(buff, 4))
 	fileInfo.Fragments = make([]sys.Fragment, frags)
 	for i := 0; i < frags; i++ {

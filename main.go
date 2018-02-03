@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	minSize int64 = 4 * 1024
+	minSize int64 = 4096
+	blockSize int64 = 4096
 )
 
 var (
@@ -51,17 +52,16 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	}
 	defer f.Close()
 
+	var size int64
+	if stat, err := f.Stat(); err == nil {
+		size = stat.Size()
+	}
+
 	fragments, err := sys.Fragments(f)
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
-	for idx, frag := range fragments[1:] {
-		if fragments[idx].Start+fragments[idx].Length == frag.Start {
-			log.Printf("Contignues fragments found at extend %d in file: %s", idx+1, path)
-			break
-		}
-	}
-	return &storage.FileInformation{Path: pathnr, Fragments: fragments}, nil
+	return &storage.FileInformation{Path: pathnr, Size: size, Fragments: fragments}, nil
 }
 
 func makeChecksum(data []byte) [16]byte {
@@ -196,6 +196,7 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 
 	if noact {
 		log.Printf("File %s has %d fragments, but will not be defragmented because -noact option is specified", path, fragcount)
+		return false
 	}
 
 	log.Printf("File %s has %d fragments, we defragment it before deduplication", path, fragcount)
@@ -225,28 +226,25 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, def
 	return true
 }
 
-// Returns true if the files share the same data until the given size
-// currently not most efficient (n^2 in number of blocks), could be improved in the future
-func isShared(files []*storage.FileInformation, size int64) bool {
-	for i := int64(0); i < size/4096; i++ {
+// Returns the first offset that is not shared amongst the files, or size if the files are
+// shared up to the specified size
+func unsharedStart(files []*storage.FileInformation, size int64) int64 {
+	for i := int64(0); i < size; i+=blockSize {
 		offset := files[0].PhysicalOffsetAt(i)
 		for _, file := range files[1:] {
 			if file.PhysicalOffsetAt(i) != offset {
-				return false
+				return i
 			}
 		}
 	}
-	return true
+	return size
 }
 
 // Submits the files for deduplication. Only if duplication seems to make sense they will actually be deduplicated
 func submitForDedup(ctx context, files []*storage.FileInformation, defragThreshold int, noact bool) {
 	defer ctx.stats.Deduplicating(len(files))
 
-	defragged := false
-	if !noact {
-		defragged = reorderAndDefragIfNeeded(ctx, files, defragThreshold, noact)
-	}
+	reorderAndDefragIfNeeded(ctx, files, defragThreshold, noact)
 
 	if len(files) < 2 || files[0].Error {
 		return
@@ -255,28 +253,25 @@ func submitForDedup(ctx context, files []*storage.FileInformation, defragThresho
 	// currently we assume that the files are equal up to the size of the smallest file
 	var size int64 = math.MaxInt64
 	for _, file := range files {
-		if file.Size() < size {
-			size = file.Size()
+		if file.Size < size {
+			size = file.Size
 		}
 	}
 
 	filenames := make([]string, len(files))
-	//sameOffset := true
-	//physicalOffset := files[0].PhysicalOffset()
 	for i, file := range files {
-		//if file.PhysicalOffset() != physicalOffset {
-		//	sameOffset = false
-		//}
 		filenames[i] = ctx.pathstore.FilePath(file.Path)
 	}
-	alreadyShared := isShared(files, size)
-	if !defragged && alreadyShared { // when a file is defragmented we always need to deduplicate because deduplication breaks extend sharing
+	startUnshared := unsharedStart(files, size)
+	if startUnshared == size {
 		log.Printf("Skipping %s and %d other files, they are already shared", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
-		log.Printf("Offering for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
-		Dedup(filenames, 0, uint64(size))
+		log.Printf("Offering for deduplication: %s and %d other files from offset %d\n", filenames[0], len(files)-1, startUnshared)
+		offset:=uint64(startUnshared)
+		length:=uint64(size-startUnshared)
+		Dedup(filenames, offset, length)
 	} else {
 		log.Printf("Candidate for deduplication: %s and %d other files\n", filenames[0], len(files)-1)
 	}
@@ -294,13 +289,13 @@ func updateOpenFileLimit() {
 		rLimit.Cur = rLimit.Max
 		err = syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 		if err != nil {
-			log.Println("Error Setting Rlimit ", err)
+			log.Println("Error Setting Rlimit", err)
 		}
 		err = syscall.Getrlimit(syscall.RLIMIT_NOFILE, &rLimit)
 		if err != nil {
-			log.Println("Error Getting Rlimit ", err)
+			log.Println("Error Getting Rlimit", err)
 		}
-		log.Println("Open file limit increased to ", rLimit.Cur)
+		log.Println("Open file limit increased to", rLimit.Cur)
 	}
 }
 

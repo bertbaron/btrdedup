@@ -61,7 +61,16 @@ func Fragments(file *os.File) ([]Fragment, error) {
 			if extend.fe_logical != start {
 				return nil, errors.New("Sparse files are not supported")
 			}
-			result = append(result, Fragment{extend.fe_physical, extend.fe_length})
+			var previous *Fragment
+			if len(result) > 0 {
+				previous = &(result[len(result)-1])
+			}
+			if previous != nil && previous.Start + previous.Length == extend.fe_physical {
+				// merge contignues extents
+				previous.Length += extend.fe_length
+			} else {
+				result = append(result, Fragment{extend.fe_physical, extend.fe_length})
+			}
 			start += extend.fe_length
 		}
 	}

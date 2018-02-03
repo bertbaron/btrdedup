@@ -16,6 +16,7 @@ type FileInformation struct {
 	// Number from the PathStorage
 	Path      int32
 	Error     bool
+	Size	  int64
 	Fragments []sys.Fragment
 	Csum      [HashSize]byte
 }
@@ -34,17 +35,17 @@ func (information *FileInformation) PhysicalOffsetAt(i int64) uint64 {
 		remaining = remaining - frag.Length
 	}
 	// TODO Handle this in a nicer way
-	log.Fatalf("Offset %d is beyond file size", i)
+	log.Fatalf("Offset %d is beyond file size %d", i, information.Size)
 	return 0 // will never be reached
 }
 
-func (f *FileInformation) Size() int64 {
-	size := int64(0)
-	for _, frag := range f.Fragments {
-		size += int64(frag.Length)
-	}
-	return size
-}
+//func (f *FileInformation) Size() int64 {
+//	size := int64(0)
+//	for _, frag := range f.Fragments {
+//		size += int64(frag.Length)
+//	}
+//	return size
+//}
 
 func (f *FileInformation) Writable(pathstore PathStorage) bool {
 	return unix.Access(pathstore.FilePath(f.Path), unix.W_OK) == nil
