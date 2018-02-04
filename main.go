@@ -156,9 +156,9 @@ func loadFileInformation(ctx context) {
 	})
 }
 
-func avgBlocksPerFragment(file *storage.FileInformation) int {
-	fragcount := len(file.Fragments)
-	return int((file.Size / int64(fragcount)) / blockSize)
+func allowedFragcount(file *storage.FileInformation, minBpf int) int {
+	fragSize := int64(minBpf) * blockSize
+	return int((file.Size - 1) / fragSize) +1
 }
 // Currently we always deduplicate towards the first file. Therefore we place the least-defragmented file in first
 // position and, if the fragmentation is higher than the threshold, defragment it first.
@@ -173,8 +173,12 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 		}
 	}
 
-	bpf := avgBlocksPerFragment(files[0])
-	if minBpf < 1 || bpf > minBpf {
+	if minBpf < 1 {
+		return false
+	}
+	fragcount := len(files[0].Fragments)
+	allowedFragcount := allowedFragcount(files[0], minBpf)
+	if fragcount <= allowedFragcount {
 		return false
 	}
 
@@ -196,14 +200,14 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 		return false
 	}
 
-	bpf = avgBlocksPerFragment(file)
+	fragcount = len(file.Fragments)
 
 	if noact {
-		log.Printf("File %s has %d blocks per fragment, but will not be defragmented because -noact option is specified", path, bpf)
+		log.Printf("File %s has %d fragments while we want max %d, but will not be defragmented because -noact option is specified", path, fragcount, allowedFragcount)
 		return false
 	}
 
-	log.Printf("File %s has %d blocks per fragment, we defragment it before deduplication", path, bpf)
+	log.Printf("File %s has %d fragments while we want max %d, starting defragmentation", path, fragcount, allowedFragcount)
 	command := exec.Command("btrfs", "filesystem", "defragment", "-f", path)
 	stderr, err := command.StderrPipe()
 	if err != nil {
@@ -225,7 +229,7 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 		log.Printf("Error while reading the fragmentation table again: %v", err)
 	} else {
 		files[0] = newFile
-		log.Printf("Number of blocks per fragment was %d and is now %d for file %s", bpf, avgBlocksPerFragment(newFile), path)
+		log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
 	}
 	return true
 }
