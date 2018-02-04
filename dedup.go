@@ -14,12 +14,12 @@ const (
 func dedup(filenames []string, offset, length uint64) bool {
 	same := make([]sys.BtrfsSameExtendInfo, 0)
 	for _, filename := range filenames {
-		file, err := os.OpenFile(filename, os.O_RDONLY, 0)
-		if err != nil {
-			log.Fatal(err)
+		if file, err := os.OpenFile(filename, os.O_RDONLY, 0); err != nil {
+			log.Printf("Skipping %s, error while opening: %v", filename, err)
+		} else {
+			defer file.Close()
+			same = append(same, sys.BtrfsSameExtendInfo{file, offset})
 		}
-		defer file.Close()
-		same = append(same, sys.BtrfsSameExtendInfo{file, offset})
 	}
 
 	result, err := sys.BtrfsExtendSame(same, length)
