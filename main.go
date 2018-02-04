@@ -272,7 +272,7 @@ func submitForDedup(ctx context, files []*storage.FileInformation, minBpf int, n
 	}
 	startUnshared := unsharedStart(files, size)
 	if startUnshared == size {
-		log.Printf("Skipping %s and %d other files, they are already shared", filenames[0], len(files)-1)
+		//log.Printf("Skipping %s and %d other files, they are already shared", filenames[0], len(files)-1)
 		return
 	}
 	if !noact {
