@@ -33,8 +33,9 @@ type fiemap struct {
 }
 
 type Fragment struct {
-	Start  uint64
-	Length uint64
+	Logical uint64
+	Start   uint64
+	Length  uint64
 }
 
 // Returns all the fragments of the file in logical order. Sparse files are not supported with this function,
@@ -58,9 +59,6 @@ func Fragments(file *os.File) ([]Fragment, error) {
 		}
 		for _, extend := range data.fm_extents[0:data.fm_mapped_extents] {
 			last = last || extend.fe_flags&FIEMAP_EXTENT_LAST != 0
-			if extend.fe_logical != start {
-				return nil, errors.New("Sparse files are not supported")
-			}
 			var previous *Fragment
 			if len(result) > 0 {
 				previous = &(result[len(result)-1])
@@ -69,7 +67,7 @@ func Fragments(file *os.File) ([]Fragment, error) {
 				// merge contignues extents
 				previous.Length += extend.fe_length
 			} else {
-				result = append(result, Fragment{extend.fe_physical, extend.fe_length})
+				result = append(result, Fragment{extend.fe_logical, extend.fe_physical, extend.fe_length})
 			}
 			start += extend.fe_length
 		}

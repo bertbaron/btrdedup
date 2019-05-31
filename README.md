@@ -11,11 +11,17 @@ Btrdedup does not maintain state between runs. This makes it less suitable for i
  hand it makes the tool very robust and because of its efficiency in detecting already deduplicated files it can easily
  be scheduled to run once a month for example.
 
+# Snapshot-aware deduplication
+
+Since version 0.2.0 there is an option to defragment files before deduplication. This acts like a snapshot-aware
+ defragmentation. The system defragmentation tool will be used to defragement one of the copies after which the
+ dedpuclication process will deduplicate all copies to the defragmentated one.
+
 # Installation
 
 Download the latest release:
 
-[![release](http://github-release-version.herokuapp.com/github/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
+[![](https://img.shields.io/github/release/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
 
 Make executable using: ```chmod +x btrdedup```
 
@@ -27,13 +33,25 @@ Typically you want to run the program as root on the complete mounted btrfs pool
 nice -n 10 ./btrdedup /mnt 2>dedup.log
 ```
 
-or
+or in the background
 
 ```shell
 nice -n 10 ./btrdedup /mnt >dedup.out 2>dedup.log &
 ```
 
-The scanning phase may still take a long time depending on the number of files. The most expensive part however,
+It is also possible to specify specific files or folders for deduplication and defragmentation. Make sure that all
+potential copies are on the given paths because the deduplication process might actually break reflinks to copies
+that aren't seen.
+
+This is an example where certain folders and snapshots are deduplicated and defragmented, excluding files smaller
+ than 256 blocks (1MB):
+
+```shell
+./btrdedup -minsize 256 -defrag /data/media /snapshots/data*/media 2>dedup.log
+```
+
+The scanning phase may still take a long time depending on the number of files. The -minsize option may help a lot
+ when there are many small files for which deduplication will not help much. The most expensive part however,
  the deduplication itself, is only called when necessary.
  
 Btrfdedup is very memory efficient and doesn't require a database. It can be instructed to use even less memory

@@ -34,9 +34,12 @@ func (information *FileInformation) PhysicalOffsetAt(i int64) uint64 {
 		}
 		remaining = remaining - frag.Length
 	}
-	// TODO Handle this in a nicer way
-	log.Fatalf("Offset %d is beyond file size %d", i, information.Size)
-	return 0 // will never be reached
+	log.Printf("WARNING: Offset %d is beyond file fragments:")
+	log.Printf("DEBUG: size: %d, fragments: ", information.Size)
+	for idx, frag := range information.Fragments {
+		log.Printf("DEBUG:     %d, %d, %d", idx, frag.Start, frag.Length)
+	}
+	return 0 // TODO Return an error?
 }
 
 //func (f *FileInformation) Size() int64 {

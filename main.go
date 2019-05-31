@@ -15,11 +15,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/pprof"
+	"strings"
 	"syscall"
 )
 
 const (
-	minSize int64 = 4096
 	blockSize int64 = 4096
 )
 
@@ -61,6 +61,16 @@ func readFileMeta(pathnr int32, path string) (*storage.FileInformation, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "Failed to read fragments for file")
 	}
+
+	var tot uint64
+	for _, frag := range fragments {
+		tot += frag.Length
+	}
+	if uint64(size) > tot {
+		log.Printf("Skipping sparse file %s", path)
+		return nil, nil
+	}
+
 	return &storage.FileInformation{Path: pathnr, Size: size, Fragments: fragments}, nil
 }
 
@@ -107,12 +117,16 @@ func createChecksums(ctx context, files []*storage.FileInformation) bool {
 	return true
 }
 
-func collectFiles(ctx context, parent int32, name string) {
+func collectFiles(ctx context, parent int32, name string, minSize int, exclude string) {
 	path := name
 	if parent >= 0 {
 		path = filepath.Join(ctx.pathstore.DirPath(parent), name)
 	}
 
+	if exclude != "" && strings.HasPrefix(path, exclude) {
+		log.Printf("Excluding %s", path)
+		return
+	}
 	fi, err := os.Lstat(path)
 	if err != nil {
 		log.Printf("Error using os.Lstat on file %s: %v", path, err)
@@ -132,11 +146,11 @@ func collectFiles(ctx context, parent int32, name string) {
 		}
 		pathnr := ctx.pathstore.AddDir(parent, name)
 		for _, e := range elements {
-			collectFiles(ctx, pathnr, e)
+			collectFiles(ctx, pathnr, e, minSize, exclude)
 		}
 	case mode.IsRegular():
 		size := fi.Size()
-		if size > minSize {
+		if size/blockSize >= int64(minSize) {
 			ctx.pathstore.AddFile(parent, name)
 		}
 	}
@@ -150,9 +164,10 @@ func loadFileInformation(ctx context) {
 			log.Printf("Error while trying to get the fragments of file %s: %v", path, err)
 			return
 		}
-		ctx.stats.FileAdded()
-		ctx.state.AddFile(*fileInformation)
-
+		if fileInformation != nil {
+			ctx.stats.FileAdded()
+			ctx.state.AddFile(*fileInformation)
+		}
 	})
 }
 
@@ -307,14 +322,14 @@ func updateOpenFileLimit() {
 	}
 }
 
-func collectApplicableFiles(ctx context, filenames []string) {
+func collectApplicableFiles(ctx context, filenames []string, minSize int, exclude string) {
 	fmt.Printf("Searching for applicable files\n")
 	for _, filename := range filenames {
-		collectFiles(ctx, -1, filename)
+		collectFiles(ctx, -1, filename, minSize, exclude)
 	}
 }
 
-func pass1(ctx context, filenames []string) {
+func pass1(ctx context) {
 	fmt.Printf("Pass 1 of 3, collecting fragmentation information\n")
 	ctx.state.StartPass1()
 	ctx.stats.StartFileinfoProgress()
@@ -365,8 +380,10 @@ func main() {
 	noact := flag.Bool("noact", false, "if provided, the tool will only scan and log results, but not actually deduplicate")
 	lowmem := flag.Bool("lowmem", false, "if provided, the tool will use much less memory by using temporary files and the external sort command")
 	nopb := flag.Bool("nopb", false, "if provided, the tool will not show the progress bar even if a terminal is detected")
+	exclude := flag.String("exclude", "", "Path prefix to exclude (i.e. exclude=/var/lib/docker)")
 	defrag := flag.Bool("defrag", false, "defragment files with less than the configured number of blocks per fragment")
-	minBpf := flag.Int("pbf", 1024, "minimal average number of blocks per fragment before defragmentation, default=1024 (4MB)")
+	minBpf := flag.Int("bpf", 1024, "minimal average number of blocks per fragment before defragmentation, default=1024 (4MB)")
+	minSize := flag.Int("minsize", 1, "skip files with size less than the given number of blocks, default is 1")
 	cpuprofile := flag.String("cpuprofile", "", "write cpu profile to file")
 	memprofile := flag.String("memprofile", "", "write memory profile to this file")
 	flag.Parse()
@@ -414,20 +431,20 @@ func main() {
 		ctx.state = storage.NewFileBased()
 	}
 
-	collectApplicableFiles(ctx, filenames)
+	collectApplicableFiles(ctx, filenames, *minSize, *exclude)
 	ctx.stats.SetFileCount(ctx.pathstore.FileCount())
 
-	pass1(ctx, filenames)
+	pass1(ctx)
 
 	writeHeapProfile(*memprofile, "_pass1")
 
 	pass2(ctx)
 
-	writeHeapProfile(*memprofile, "_pass1")
+	writeHeapProfile(*memprofile, "_pass2")
 
 	pass3(ctx, *minBpf, *noact)
 
-	writeHeapProfile(*memprofile, "_pass1")
+	writeHeapProfile(*memprofile, "_pass3")
 
 	ctx.stats.Stop()
 	fmt.Println("Done")
