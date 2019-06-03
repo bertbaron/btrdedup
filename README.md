@@ -21,7 +21,7 @@ Since version 0.2.0 there is an option to defragment files before deduplication.
 
 Download the latest release:
 
-[![](https://img.shields.io/github/release/bertbaron/btrdedup/release.svg)](https://github.com/bertbaron/btrdedup/releases/latest)
+https://img.shields.io/github/release/bertbaron/btrdedup.svg
 
 Make executable using: ```chmod +x btrdedup```
 
