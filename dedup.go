@@ -21,6 +21,9 @@ func dedup(filenames []string, offset, length uint64) bool {
 			same = append(same, sys.BtrfsSameExtendInfo{file, offset})
 		}
 	}
+	if len(same) < 2 {
+		return false
+	}
 
 	result, err := sys.BtrfsExtendSame(same, length)
 	if err != nil {
