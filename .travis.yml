@@ -8,6 +8,7 @@ deploy:
   api_key:
     secure: 3jr4wdkvuIQZTWrO8ifKH9ooeOultHrdXgwwF430p/HzDc1aKwuzyKiDJpv3FTGi7UQIFdgkyaCwJ8kvXn8J80jN8kAQCVKIPox+QmBa11/TaXqtvuzQ/3VX7pKoDXHPuw1+GMqTiAryXaGj+6FRR+Q/QAWhux/ekJT2s+NlvkzdOzxVwhympvYA84dcp1HaecbTJumS46cmV/IzcwqzR/0+bK86hscR63VIOmeQJpzOFBHmEny/QyekumewfRbxjbaULyJT5Ra+0Ry00HihRTdu7HqBa8BJZxHyzn8F1a0+LxYjrUixHthCJUwzLkvOtqVRx2n9dvqEIgnCsjsoCtkkB1Wj7sC7IZ+rmuhnK1T6SCq9/5tPXJ7enVx83r0UN1NCYnBFw57FRK2j9aurHmxZpJP65kBdBAJrxXyLhATtKgvk94qdGwgrXFPB5Aj/5GBxrgPd249Kmgw1dYoN3eQKVxEdb3884Okc8/kCERtRoxpv79u82LdjR4O+Hu4h8wMf0S8otcEfD35uL4yl3S4K6KjDq+h2GfL+Yx5E1/5NYVaYZEQKpL2l054iDbXqBGUQIkLGx9vtcWhHhovxc+Bb1IkmBbGxWBlnnwLk2MI25hpKYlppgtX3XntH5HRcoO8j3VKC2PEchqLLRSOkakIo/HqPluDqsbIMfNCWUTE=
   file: btrdedup
+  skip_cleanup: true
   on:
     repo: bertbaron/btrdedup
     tags: true
