@@ -11,7 +11,7 @@ Btrdedup does not maintain state between runs. This makes it less suitable for i
  hand it makes the tool very robust and because of its efficiency in detecting already deduplicated files it can easily
  be scheduled to run once a month for example.
 
-# Snapshot-aware deduplication
+# Snapshot-aware defragmentation
 
 Since version 0.2.0 there is an option to defragment files before deduplication. This acts like a snapshot-aware
  defragmentation. The system defragmentation tool will be used to defragement one of the copies after which the
