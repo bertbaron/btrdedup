@@ -180,46 +180,51 @@ func allowedFragcount(file *storage.FileInformation, minBpf int) int {
 //
 // Note that when we will do the deduplication more clever (comparing all blocks of all files), we may also need to do
 // the defragmentation in a more clever way.
-func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, minBpf int, noact bool) bool {
-	// least-fragmented file first
+func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, minBpf int, noact bool) (copy []*storage.FileInformation) {
+	copy = make([]*storage.FileInformation, len(files), len(files))
 	for idx, file := range files {
-		if len(file.Fragments) < len(files[0].Fragments) {
-			files[0], files[idx] = files[idx], files[0]
+		copy[idx] = file
+	}
+
+	// least-fragmented file first
+	for idx, file := range copy {
+		if len(file.Fragments) < len(copy[0].Fragments) {
+			copy[0], copy[idx] = copy[idx], copy[0]
 		}
 	}
 
 	if minBpf < 1 {
-		return false
+		return
 	}
-	fragcount := len(files[0].Fragments)
-	allowedFragcount := allowedFragcount(files[0], minBpf)
+	fragcount := len(copy[0].Fragments)
+	allowedFragcount := allowedFragcount(copy[0], minBpf)
 	if fragcount <= allowedFragcount {
-		return false
+		return
 	}
 
 	// Non-writable files (i.e. from read-only snapshots) can not be defragmented, so find a writable file
 	writableFound := false
-	for idx, file := range files {
+	for idx, file := range copy {
 		if file.Writable(ctx.pathstore) {
-			files[0], files[idx] = files[idx], files[0]
+			copy[0], copy[idx] = copy[idx], copy[0]
 			writableFound = true
 			break;
 		}
 	}
 
-	file := files[0]
+	file := copy[0]
 	path := ctx.pathstore.FilePath(file.Path)
 
 	if !writableFound {
 		log.Printf("File %s can not be defragmented, none of the duplicates are writable", path)
-		return false
+		return
 	}
 
 	fragcount = len(file.Fragments)
 
 	if noact {
 		log.Printf("File %s has %d fragments while we want max %d, but will not be defragmented because -noact option is specified", path, fragcount, allowedFragcount)
-		return false
+		return
 	}
 
 	log.Printf("File %s has %d fragments while we want max %d, starting defragmentation", path, fragcount, allowedFragcount)
@@ -230,23 +235,26 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 	}
 	if err := command.Start(); err != nil {
 		log.Printf("Defragmentation of %s failed to start: %v", path, err)
-		return false
+		return
 	}
 
 	errorOutput, _ := ioutil.ReadAll(stderr)
 	if err := command.Wait(); err != nil {
 		log.Printf("Defragmentation of %s failed: %v", path, err)
 		log.Printf("Defragmentation error output: %s", errorOutput)
-		return true // even if defragmentation failed, the file might be (partly) defragmented
+		return
 	}
 
 	if newFile, err := readFileMeta(file.Path, path); err != nil {
 		log.Printf("Error while reading the fragmentation table again: %v", err)
+	} else if newFile == nil {
+		log.Printf("File can not be deduplicated after defragmentation")
+		copy = copy[1:]
 	} else {
-		files[0] = newFile
+		copy[0] = newFile
 		log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
 	}
-	return true
+	return
 }
 
 // Returns the first offset that is not shared amongst the files, or size if the files are
@@ -267,7 +275,7 @@ func unsharedStart(files []*storage.FileInformation, size int64) int64 {
 func submitForDedup(ctx context, files []*storage.FileInformation, minBpf int, noact bool) {
 	defer ctx.stats.Deduplicating(len(files))
 
-	reorderAndDefragIfNeeded(ctx, files, minBpf, noact)
+	files = reorderAndDefragIfNeeded(ctx, files, minBpf, noact)
 
 	if len(files) < 2 || files[0].Error {
 		return
