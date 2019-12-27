@@ -55,7 +55,7 @@ func Fragments(file *os.File) ([]Fragment, error) {
 			return nil, err
 		}
 		if data.fm_mapped_extents == 0 {
-			return nil, errors.New("No (more) extends found")
+			return nil, errors.New("No (more) extends found, file may be sparse")
 		}
 		for _, extend := range data.fm_extents[0:data.fm_mapped_extents] {
 			last = last || extend.fe_flags&FIEMAP_EXTENT_LAST != 0

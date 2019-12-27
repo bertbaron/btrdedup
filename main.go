@@ -181,6 +181,9 @@ func allowedFragcount(file *storage.FileInformation, minBpf int) int {
 // Note that when we will do the deduplication more clever (comparing all blocks of all files), we may also need to do
 // the defragmentation in a more clever way.
 func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, minBpf int, noact bool) (copy []*storage.FileInformation) {
+	if len(files) == 0 {
+		return files
+	}
 	copy = make([]*storage.FileInformation, len(files), len(files))
 	for idx, file := range files {
 		copy[idx] = file
@@ -198,6 +201,7 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 	}
 	fragcount := len(copy[0].Fragments)
 	allowedFragcount := allowedFragcount(copy[0], minBpf)
+	allowedFragcount = 1
 	if fragcount <= allowedFragcount {
 		return
 	}
@@ -247,9 +251,10 @@ func reorderAndDefragIfNeeded(ctx context, files []*storage.FileInformation, min
 
 	if newFile, err := readFileMeta(file.Path, path); err != nil {
 		log.Printf("Error while reading the fragmentation table again: %v", err)
+		return reorderAndDefragIfNeeded(ctx, copy[1:], minBpf, noact)
 	} else if newFile == nil {
 		log.Printf("File can not be deduplicated after defragmentation")
-		copy = copy[1:]
+		return reorderAndDefragIfNeeded(ctx, copy[1:], minBpf, noact)
 	} else {
 		copy[0] = newFile
 		log.Printf("Number of fragments was %d and is now %d for file %s", fragcount, len(newFile.Fragments), path)
